@@ -1,0 +1,440 @@
+{
+  "project": "Personal File Manager",
+  "version": "v0.1",
+  "source": "docs/releases/v0.1/PLAN.md",
+  "executionPolicy": "sequential",
+  "remoteRepository": "https://github.com/nampluskr/file_manager.git",
+  "changeManagementPolicy": "When a user request changes the implementation or project content, update the affected release documents in this exact order: BRIEF.md, PRD.md, SPEC.md, PLAN.md, then backlog.json.",
+  "phaseStatusPolicy": "Phase completion is recorded only in each phase's status field. Do not duplicate phase status in README.md, BRIEF.md, PRD.md, SPEC.md, or PLAN.md.",
+  "implementationLanguagePolicy": "Product functionality must be implemented in TypeScript. Python is not used for Electron or React application features and may only be used for optional development tooling such as test-data generation or verification automation.",
+  "roleAssignment": {
+    "implementer": "Claude Code",
+    "adversarialReviewer": "Codex sol",
+    "rationale": "Implementer and reviewer are deliberately from different vendors. Splitting sessions within one model family still shares training bias and code idioms, leaving the failure mode where both miss the same defect."
+  },
+  "moduleBoundaryPolicy": "src/main/filesystem/* must not import electron. It uses only node:fs and node:path. Electron dependencies such as shell.trashItem are injected at the src/main/ipc/ layer. Violating this boundary makes the most dangerous code untestable under Vitest.",
+  "phaseCompletionWorkflow": [
+    "Implement the phase scope and verify its acceptance criteria (selfVerification).",
+    "Commit the phase work and record the commit hash.",
+    "Request an adversarial review from Codex sol using only file-system context: the phase diff, the referenced SPEC sections, and the phase's adversarialFocus list. Do not pass the Claude session transcript or implementation rationale.",
+    "Codex sol records findings in docs/releases/v0.1/reviews/A{n}.md with Critical/Major/Minor severity, reproduction conditions, and violated SPEC clause. Codex sol must not modify code.",
+    "Claude Code fixes all Critical findings and reruns the same adversarial review to confirm resolution. Findings that are not accepted must be answered with a written rebuttal in the same review file.",
+    "Report changes, verification results, and remaining Major/Minor findings to the user, then request approval.",
+    "Only after user approval, push the completed phase to the remote repository."
+  ],
+  "phaseGate": "A phase is complete only when selfVerification passes, the adversarial review reports zero unresolved Critical findings, reviews/A{n}.md is written, and the phase is committed. Major findings may be deferred with a recorded reason and target phase.",
+  "mandatoryReviewPhases": ["phase-02", "phase-04", "phase-07"],
+  "mandatoryReviewRationale": "These phases cover command injection, data corruption, and data loss respectively. All three are irreversible, so no Critical finding may be deferred.",
+  "reviewFallback": "If Codex sol is unavailable, report the reason, propose an alternative reviewer or validation method, and request user approval before proceeding. Do not skip adversarial review on the mandatory phases.",
+  "commitPolicy": "One approved completed phase per commit; do not push before user approval.",
+  "reviewFileTemplate": "docs/releases/v0.1/reviews/A{n}.md — must record target commit hash, reviewer model, run date, finding counts by severity, and per-finding reproduction/violation/resolution.",
+  "phases": [
+    {
+      "id": "phase-00",
+      "order": 0,
+      "title": "환경 구성과 프로젝트 기반",
+      "status": "pending",
+      "dependsOn": [],
+      "mandatoryReview": false,
+      "scope": [
+        "Node.js, npm, Git의 설치 및 버전 확인",
+        "프로젝트 루트에서 Git 저장소 초기화 및 .gitignore 구성",
+        "mdviewer의 electron-vite, TypeScript, electron-builder 구성 이관",
+        "main / preload / renderer / shared 디렉터리 골격 생성",
+        "shared/types.ts에 FileEntry, PaneState, AppState, Settings 정의",
+        "shared/ipc.ts에 채널명과 요청·응답 타입 정의",
+        "contextIsolation 활성 및 nodeIntegration 비활성 설정",
+        "Vitest 설정 및 src/main/filesystem 대상 테스트 실행 경로 확인",
+        "외부 사용자를 위한 README.md 작성",
+        "AGENTS.md 작성 — 매 턴 지켜야 할 규칙만 압축"
+      ],
+      "acceptanceCriteria": [
+        "개발 환경에서 빈 Electron 창이 실행된다.",
+        "main, preload, renderer가 분리되어 동작하고 typed IPC 왕복 1건이 성공한다.",
+        "production 빌드를 생성할 수 있다.",
+        "npm test가 실행되고 src/main/filesystem의 순수 함수 테스트가 통과한다.",
+        "README.md가 프로젝트 목적, 현재 구현 상태, 계획된 주요 기능을 안내한다.",
+        "AGENTS.md에 Renderer의 node:fs 직접 호출 금지, filesystem/*의 electron import 금지, 외부 프로세스 인자 배열 전달, 삭제 기본값은 휴지통, 의존성 추가 전 승인이 포함된다."
+      ],
+      "selfVerification": [
+        "npm run dev 기동 확인",
+        "npm run build 산출물 생성 확인",
+        "더미 IPC 채널 왕복 확인",
+        "npm test 통과 확인"
+      ],
+      "adversarialFocus": [
+        "filesystem/*의 electron import 금지를 강제할 장치가 있는가, 아니면 규약 문서뿐인가. 규약뿐이면 어떻게 위반되는가.",
+        "shared/types.ts가 Phase 7의 파일 작업(충돌 응답, 부분 실패, 취소)을 표현할 수 있는가. 지금 빠져 있는 필드를 지적하라.",
+        "preload가 노출하는 API 표면이 실제 필요보다 넓지 않은가.",
+        "Vitest가 electron을 import하는 모듈에 닿으면 어떻게 실패하는가. 실패가 명확한가, 조용한가."
+      ],
+      "specRefs": ["SPEC §7", "SPEC §11", "SPEC §13.2", "SPEC §17"]
+    },
+    {
+      "id": "phase-01",
+      "order": 1,
+      "title": "단일 패널 탐색",
+      "status": "pending",
+      "dependsOn": ["phase-00"],
+      "mandatoryReview": false,
+      "scope": [
+        "listDirectory.ts — fs.readdir(withFileTypes) 및 lstat 기반 FileEntry 변환",
+        "pathUtils.ts — 긴 경로(\\\\?\\) 처리, 경로 정규화, 소문자 정규화 키",
+        "FileList — 고정 행 높이 기반 windowing 및 overscan",
+        "FileRow — React.memo, 원시값 props만 수신",
+        "엔트리 정렬 — [..] 고정, 폴더 우선, 자연 정렬 비교자",
+        "키 처리 — 방향키, PgUp/PgDn, Home/End, Enter, Backspace",
+        "Type-ahead 및 포커스 복원 규칙",
+        "PathBar, 컬럼 헤더, 기본 Dark 테마 토큰",
+        "IPC 경로 검증"
+      ],
+      "acceptanceCriteria": [
+        "디렉터리 목록이 파일명 / 확장자 / 크기 / 날짜 컬럼으로 표시된다.",
+        "폴더가 파일보다 먼저 표시되고 [..]이 최상단에 있다. 드라이브 루트에서는 [..]이 없다.",
+        "방향키 이동, Enter 진입, Backspace 상위 이동이 동작한다.",
+        "파일에서 Enter를 누르면 기본 연결 프로그램이 실행된다.",
+        "정렬 기준 4종과 오름/내림 반전이 동작한다.",
+        "5,000개 이상 항목이 있는 디렉터리에서 방향키 이동이 끊기지 않는다.",
+        "권한 없는 디렉터리 진입 시 앱이 죽지 않고 오류를 표시한다."
+      ],
+      "selfVerification": [
+        "node_modules(5,000+ 항목) 열기 후 방향키 연타 시 입력 뭉개짐 없음 확인",
+        "정렬 비교자 단위 테스트 — 자연 정렬, 확장자 2차 정렬, 대소문자 무시",
+        "260자 초과 긴 경로 디렉터리 진입 확인",
+        "React DevTools Profiler로 포커스 이동 시 재렌더링 행 수 확인"
+      ],
+      "adversarialFocus": [
+        "정렬 경계 — file2 vs file10, 확장자 없는 파일, 이름이 .으로 시작, 이름이 숫자만, 대소문자만 다른 동일 이름.",
+        "드라이브 루트에서 Backspace 동작과 [..] 유무.",
+        "FileRow에 인라인 객체나 새 함수가 전달되어 React.memo가 무력화된 지점을 찾아라.",
+        "windowing 계산이 스크롤 끝, 항목 0개, 컨테이너 높이 0에서 어떻게 되는가.",
+        "Type-ahead 버퍼가 오버레이·대화상자 상태와 충돌하는 경로.",
+        "OneDrive 온디맨드 경로에서 lstat이 지연될 때 목록 조회가 어떻게 되는가."
+      ],
+      "specRefs": ["SPEC §3.4", "SPEC §4", "SPEC §10.1", "SPEC §10.2", "SPEC §12"]
+    },
+    {
+      "id": "phase-02",
+      "order": 2,
+      "title": "Command Launcher",
+      "status": "pending",
+      "dependsOn": ["phase-01"],
+      "mandatoryReview": true,
+      "intentMilestone": "이 Phase 완료 시점에 'cmd를 열고 cd로 찾아 들어가는' 마찰이 사라진다. 여기까지만 완료해도 매일 사용 가능하다.",
+      "scope": [
+        "launcher.ts — Windows Terminal(wt.exe) 존재 여부 앱 시작 시 1회 확인 후 캐싱",
+        "터미널 실행 — wt.exe 있으면 시작 디렉터리 전달, 없으면 cmd.exe 새 창",
+        "프리셋 5종 — cmd / claude / codex / agy / code .",
+        ".cmd shim 대응 — cmd.exe /c 경유",
+        "execFile에 인자 배열 전달, 문자열 조합 금지",
+        "detached: true 및 unref()",
+        "CommandLauncher UI, Ctrl+L 포커스, 숫자 1~5 실행",
+        "Ctrl+T 터미널, Ctrl+E VSCode 단축키",
+        "실행 실패 시 명확한 오류 표시"
+      ],
+      "acceptanceCriteria": [
+        "현재 경로에서 cmd / claude / codex / agy가 새 터미널 창으로 실행된다.",
+        "현재 경로에서 code .이 실행된다.",
+        "앱을 종료해도 실행된 터미널 세션이 살아 있다.",
+        "Windows Terminal이 없는 환경에서 cmd.exe로 폴백한다.",
+        "실행 파일을 찾지 못하면 어떤 명령이 실패했는지 표시한다.",
+        "자유 명령 문자열 입력 경로가 존재하지 않는다."
+      ],
+      "selfVerification": [
+        "프리셋 5종 각각 실행 확인",
+        "앱 종료 후 터미널 세션 생존 확인",
+        "폴더명에 & 가 포함된 경로에서 실행 확인",
+        "PATH에서 명령을 제거한 상태로 실행 시 오류 표시 확인"
+      ],
+      "adversarialFocus": [
+        "명령 주입 전면 공격. 폴더명에 & && | ^ 큰따옴표 작은따옴표 %PATH% %CD% 백틱 $() 개행 공백 유니코드 방향제어문자를 넣고 각 프리셋을 실행해 임의 명령이 실행되는지 확인하라.",
+        "cmd.exe /c 경유 지점에서 인자가 다시 문자열로 합쳐지는 곳이 있는가.",
+        "wt.exe에 전달하는 인자가 배열로 유지되는가. wt 자체의 세미콜론 인자 파싱이 주입 경로가 되는가.",
+        "cwd가 존재하지 않거나 접근 불가일 때 어떻게 되는가.",
+        "detached 또는 unref 누락으로 앱 종료 시 함께 죽는 경로가 있는가.",
+        "실행 실패가 조용히 삼켜지는 경로 — execFile 콜백 미처리, Promise rejection 미포착.",
+        "Renderer가 sys:launch에 프리셋 ID 외의 값을 보낼 수 있는가. Main이 화이트리스트로 검증하는가."
+      ],
+      "specRefs": ["SPEC §3.6", "SPEC §8.4", "SPEC §12.4"]
+    },
+    {
+      "id": "phase-03",
+      "order": 3,
+      "title": "뷰어 (F3)",
+      "status": "pending",
+      "dependsOn": ["phase-02"],
+      "mandatoryReview": false,
+      "scope": [
+        "readTextFile.ts — BOM 확인 후 UTF-8 유효성 검사, 실패 시 CP949 간주",
+        "Viewer 컴포넌트 및 Esc 닫기",
+        "Markdown 렌더링 — react-markdown + remark-gfm, 동적 import",
+        "렌더링 실패 시 원문 폴백",
+        "지원 확장자 외 파일의 지원하지 않는 형식 표시",
+        "고정폭 글꼴 적용",
+        "오버레이 열림 시 패널 키 핸들러 비활성"
+      ],
+      "acceptanceCriteria": [
+        ".md 파일이 렌더링되어 표시된다.",
+        "그 외 텍스트 파일이 원문으로 표시된다.",
+        "CP949로 저장된 한글 .txt가 깨지지 않고 표시된다.",
+        "초기 번들에 markdown 렌더러가 포함되지 않는다.",
+        "이미지 / PDF 등은 지원하지 않음을 알린다.",
+        "뷰어가 파일을 잠그지 않는다."
+      ],
+      "selfVerification": [
+        "빌드 산출물 초기 청크에 react-markdown 미포함 확인",
+        "CP949 / UTF-8 / UTF-8 BOM 파일 각각 표시 확인",
+        "뷰어 열린 상태에서 터미널로 같은 파일 수정 및 삭제 시도 — 잠금 없음 확인"
+      ],
+      "adversarialFocus": [
+        "UTF-8로 오판되는 CP949 바이트열을 찾아라. 짧은 한글 문자열은 우연히 UTF-8 유효할 수 있다.",
+        "BOM만 있고 본문이 빈 파일, 0바이트 파일, 개행만 있는 파일.",
+        "바이너리 파일을 텍스트 확장자로 이름만 바꿔 열었을 때.",
+        "렌더링 폴백이 실제로 동작하는가 — 중첩 표, 닫히지 않은 코드 펜스 등 깨진 Markdown으로 확인하라.",
+        "수십 MB 텍스트 파일을 F3로 열었을 때 UI가 어떻게 되는가. 뷰어에는 크기 제한이 없다.",
+        "동적 import가 실패했을 때 어떻게 되는가."
+      ],
+      "specRefs": ["SPEC §8.1", "SPEC §8.3", "SPEC §16.7"]
+    },
+    {
+      "id": "phase-04",
+      "order": 4,
+      "title": "편집기 (F4)",
+      "status": "pending",
+      "dependsOn": ["phase-03"],
+      "mandatoryReview": true,
+      "riskNote": "이 Phase는 파일을 쓴다. 인코딩, 줄바꿈, 외부 변경 감지 세 가지를 지키지 못하면 데이터가 손상된다.",
+      "scope": [
+        "writeTextFile.ts — 판별한 인코딩으로 저장, 원본 EOL 복원",
+        "mtime 검증 — 열 때 보관, 저장 직전 재확인, 불일치 시 사용자 확인",
+        "편집 진입 차단 — 인코딩 판별 실패, 크기 초과(초기 임계값 1MB)",
+        "Editor 컴포넌트 — textarea 단일 구현",
+        "Ctrl+S 저장, Esc 닫기(변경 시 확인)",
+        "Shift+F4 — VSCode로 해당 파일 열기",
+        "오류 코드의 사용자 문구 매핑"
+      ],
+      "acceptanceCriteria": [
+        "앱 안에서 문서를 수정하고 저장할 수 있다.",
+        "저장 후 인코딩과 줄바꿈이 원본과 동일하다.",
+        "편집 중 외부에서 같은 파일이 변경되면 저장 시 경고가 뜬다.",
+        "저장하지 않고 닫으려 하면 확인 절차를 거친다.",
+        "인코딩 판별 실패 또는 크기 초과 파일은 편집 모드로 진입하지 않는다.",
+        "Shift+F4로 VSCode에서 파일이 열린다."
+      ],
+      "selfVerification": [
+        "tmpdir 통합 테스트 — CP949+CRLF, UTF-8+LF, UTF-8 BOM+CRLF 각각 읽기·쓰기 왕복 후 바이트 단위 동일성 확인",
+        "편집기 열어둔 채 터미널에서 파일 수정 후 저장 시 경고 확인",
+        "1MB 초과 파일 F4 시도 시 진입 차단 확인",
+        "Git 저장소 안의 CRLF 파일 편집 후 git diff가 전체 파일로 잡히지 않는지 확인"
+      ],
+      "adversarialFocus": [
+        "mtime 검증의 TOCTOU 창 — 확인 시점과 실제 쓰기 시점 사이에 외부 변경이 들어오면 어떻게 되는가.",
+        "mtime 해상도 한계 — 같은 초 내에 변경되면 감지되는가. 크기 또는 해시 병행 확인이 필요한가.",
+        "CRLF와 LF가 혼재된 파일을 저장하면 어떻게 되는가. 다수를 따른다가 실제로 구현되었는가.",
+        "저장 중 실패(디스크 가득, 권한 회수) 시 원본이 잘린 채 남는가. 임시 파일 후 rename 방식인가, 직접 덮어쓰기인가.",
+        "마지막 줄 개행 유무가 왕복에서 변하는가.",
+        "인코딩 판별 실패 파일이 편집 경로로 새어 들어오는 우회로가 있는가.",
+        "CP949로 표현 불가능한 문자(이모지, 중국어)를 CP949 파일에 입력하고 저장하면 조용히 물음표로 치환되는가.",
+        "읽기 전용 파일, 다른 프로세스가 잠근 파일 저장 시.",
+        "크기 임계값 1MB가 바이트 기준인지 문자 기준인지 일관되는가."
+      ],
+      "specRefs": ["SPEC §6.9", "SPEC §8.2", "SPEC §8.3"]
+    },
+    {
+      "id": "phase-05",
+      "order": 5,
+      "title": "즐겨찾기 · 경로 복원 · 새로고침",
+      "status": "pending",
+      "dependsOn": ["phase-04"],
+      "mandatoryReview": false,
+      "intentMilestone": "이 Phase가 끝나면 의도의 대부분이 충족된다. 매번 루트부터 내려가야 한다면 cd의 마찰을 앱 내부의 탐색 마찰로 옮긴 것에 지나지 않는다.",
+      "scope": [
+        "settings.ts — userData/settings.json 로드·저장, 손상 시 기본값 폴백",
+        "저장 항목 — 경로, 정렬, 테마, 창 크기·위치, 즐겨찾기, 전역 핫키",
+        "복원 경로 부재 시 상위 경로 후 홈 디렉터리 폴백",
+        "Ctrl+1~Ctrl+9 즐겨찾기 이동, Ctrl+D 목록",
+        "Ctrl+R 수동 새로고침",
+        "창 포커스 복귀 시 자동 새로고침",
+        "새로고침 후 항목명 기준 포커스 복원, 선택 상태 유지 및 사라진 키 제거",
+        "설정 저장 디바운스"
+      ],
+      "acceptanceCriteria": [
+        "재시작 시 마지막 경로, 정렬, 테마, 창 크기가 복원된다.",
+        "즐겨찾기 키 한 번으로 자주 쓰는 경로에 도달한다.",
+        "터미널에서 파일을 만든 뒤 앱 창으로 돌아오면 목록이 자동 갱신된다.",
+        "설정 파일이 없거나 손상되어도 앱이 기본값으로 시작한다.",
+        "새로고침 후 포커스가 이전 항목을 가리킨다."
+      ],
+      "selfVerification": [
+        "설정 파일 삭제 후 기동 확인",
+        "설정 파일에 잘못된 JSON 넣고 기동 확인",
+        "복원 경로를 삭제한 뒤 기동 확인",
+        "터미널에서 파일 생성 후 앱으로 전환 시 목록 갱신 확인",
+        "즐겨찾기 9개 등록 후 각 키 확인"
+      ],
+      "adversarialFocus": [
+        "손상 설정 파일 6종 — 빈 파일, 중간 잘림, 타입 불일치, version 누락, 배열이어야 할 곳이 객체, 경로가 UNC 또는 상대경로.",
+        "version 필드가 있는데 마이그레이션 경로가 없다. 다음 버전에서 어떻게 되는가.",
+        "복원 경로가 연결 끊긴 네트워크 드라이브일 때 기동이 블로킹되는가.",
+        "즐겨찾기 경로가 존재하지 않을 때, 중복 key가 있을 때, key가 1~9 범위를 벗어날 때.",
+        "저장 디바운스 중 강제 종료되면 무엇을 잃는가.",
+        "포커스 복귀 자동 새로고침이 연타되면 요청이 쌓이는가.",
+        "새로고침 중 사용자가 경로를 바꾸면 늦게 도착한 응답이 새 경로를 덮어쓰는가.",
+        "선택 상태 키의 소문자 정규화가 새로고침 후 실제로 유지되는가 — 파일명 대소문자가 외부에서 바뀐 경우."
+      ],
+      "specRefs": ["SPEC §4.4", "SPEC §9", "SPEC §13"]
+    },
+    {
+      "id": "phase-06",
+      "order": 6,
+      "title": "듀얼 패널",
+      "status": "pending",
+      "dependsOn": ["phase-05"],
+      "mandatoryReview": false,
+      "orderingNote": "화면 구조상 1순위처럼 보이지만 의도 기준의 우선순위는 그렇지 않다. Phase 1~5는 단일 패널로 진행한다.",
+      "scope": [
+        "AppState를 탭 배열 구조로 확장 — 탭 기능은 구현하지 않는다",
+        "좌우 패널 렌더링 및 균등 분할",
+        "Active Pane 시각 구분, Tab 전환",
+        "Ctrl+U — panes.left와 panes.right 전체 교환",
+        "키 라우팅 정리 — 오버레이 열림 시 패널 핸들러 비활성",
+        "패널별 독립 상태 유지 — 경로, 포커스, 선택, 스크롤, 정렬"
+      ],
+      "acceptanceCriteria": [
+        "두 패널이 독립적인 경로와 상태를 가진다.",
+        "Tab으로 Active Pane이 전환되고 시각적으로 명확히 구분된다.",
+        "Ctrl+U로 경로, 포커스, 선택, 스크롤, 정렬이 통째로 교환된다.",
+        "설정 복원 시 좌우 경로가 각각 복원된다."
+      ],
+      "selfVerification": [
+        "Ctrl+U 후 상태 객체 수준에서 교환 확인 — 표시 문자열만 바뀐 것이 아님",
+        "양쪽 패널에 각각 다른 정렬 기준 적용 후 교환 확인",
+        "오버레이 열린 상태에서 Tab, F5 등 패널 키 무시 확인"
+      ],
+      "adversarialFocus": [
+        "Ctrl+U가 표시 문자열만 바꾼 것이 아닌지 상태 객체 수준에서 검증하라. 교환 후 scrollTop, selectedNames, sortAsc가 따라갔는가.",
+        "한쪽 패널이 isLoading 중일 때 교환하면 늦게 도착한 응답이 어느 패널에 적용되는가.",
+        "양쪽 패널이 같은 경로일 때 교환, 한쪽에 error가 있을 때 교환.",
+        "activePane 값이 교환과 함께 뒤집히는 구현이 되어 있지 않은가. SPEC은 뒤집지 않는다.",
+        "키 라우팅 충돌 — F3~F6 대 Ctrl+F3~Ctrl+F6, Delete 대 Shift+Delete, Esc의 우선순위.",
+        "탭 배열 구조가 실제로 배열인가, 아니면 인덱스 0을 하드코딩해 배열인 척하는가. 탭 추가 시 무엇이 깨지는가.",
+        "useReducer 상태 전달에 Context가 섞여 들어간 곳이 있는가."
+      ],
+      "specRefs": ["SPEC §2.3", "SPEC §7.3", "SPEC §7.4", "SPEC §7.5", "SPEC §16.7"]
+    },
+    {
+      "id": "phase-07",
+      "order": 7,
+      "title": "파일 작업",
+      "status": "pending",
+      "dependsOn": ["phase-06"],
+      "mandatoryReview": true,
+      "riskNote": "되돌릴 수 없는 작업이다. 이 Phase는 테스트 없이 완료로 처리하지 않는다. Critical 지적은 곧 사용자 파일 소실을 뜻한다.",
+      "scope": [
+        "선택 — Space 토글 후 이동, Ctrl+A, Esc, 소문자 정규화 키",
+        "StatusBar — 선택분/전체 병기, 폴더는 개수만 반영",
+        "F2 이름 변경 및 금지 문자 검증",
+        "F5 복사 — fs.cp()와 AbortSignal, 폴더 충돌 시 병합",
+        "F6 이동 — fs.rename() 후 EXDEV 시 copy·검증·delete 폴백",
+        "F7 새 폴더",
+        "F8 및 Delete 휴지통(shell.trashItem), Shift+Delete 영구 삭제",
+        "이름 충돌 — overwrite/skip/rename/cancel 4종과 applyToAll",
+        "부분 실패 수집 및 결과 요약",
+        "진행 표시(현재 파일명)와 취소",
+        "오류 코드의 사용자 문구 매핑",
+        "작업 완료 후 패널 갱신 및 포커스 유지"
+      ],
+      "acceptanceCriteria": [
+        "F5 복사와 F6 이동이 좌우 패널 사이에서 동작한다.",
+        "F2 이름 변경, F7 새 폴더가 동작한다.",
+        "F8이 휴지통으로 보내고 휴지통에서 복원 가능하다.",
+        "다중 선택 항목에 대해 복사, 이동, 삭제가 일괄 동작한다.",
+        "같은 이름이 존재할 때 선택지가 제시되고 모두 적용이 동작한다.",
+        "D:에서 C:로의 드라이브 간 이동이 정상 동작한다.",
+        "사용 중인 파일이 포함되어도 나머지 항목의 작업이 계속되고 실패 목록이 표시된다.",
+        "대용량 폴더 복사 중 진행 표시가 보이고 취소할 수 있다.",
+        "Space 다중 선택 시 파일 시스템을 재조회하지 않는다."
+      ],
+      "selfVerification": [
+        "tmpdir 통합 테스트 Copy — 단일 파일, 다중 선택, 폴더 재귀, 폴더 병합",
+        "tmpdir 통합 테스트 Move — 동일 볼륨 rename, 드라이브 간 EXDEV 폴백, 폴백 중간 실패 시 원본 보존",
+        "tmpdir 통합 테스트 Rename — 정상, 중복 이름, 금지 문자",
+        "tmpdir 통합 테스트 Delete — 휴지통, 영구 삭제, 다중 선택",
+        "tmpdir 통합 테스트 충돌 — overwrite/skip/rename/cancel 각각, applyToAll 체크 시 반복 적용",
+        "tmpdir 통합 테스트 부분 실패 — 10개 중 3개 실패 시 나머지 7개 진행 및 실패 목록 반환",
+        "tmpdir 통합 테스트 취소 — 진행 중 AbortSignal 발동 및 처리된 항목 수 보고",
+        "수동 — D:에서 C:로 실제 이동, 사용 중인 파일 포함 삭제, 휴지통 복원 확인"
+      ],
+      "adversarialFocus": [
+        "EXDEV 폴백에서 원본이 먼저 삭제되는 경로가 있는가. 복사 검증이 실제로 무엇을 비교하는가 — 크기만인가, 존재 여부만인가.",
+        "폴백 중간 실패 시 복사본 정리가 실패하면 어떻게 되는가. 원본과 복사본이 둘 다 남는가, 둘 다 사라지는가.",
+        "Destination이 Source의 하위 폴더일 때 복사·이동하면 무한 재귀에 빠지는가.",
+        "Source와 Destination이 같은 경로일 때.",
+        "symlink와 junction 순환 참조. lstat 판별이 모든 재귀 지점에 있는가.",
+        "취소 시점별 잔여물 — 파일 중간 복사 중 취소하면 잘린 파일이 대상에 남는가.",
+        "applyToAll 미체크 시 50개 파일에서 대화상자가 50번 뜨는가.",
+        "applyToAll이 파일 충돌과 폴더 충돌에 무차별 적용되는가.",
+        "자동 이름 변경이 대상 이름도 이미 존재할 때 무한 루프에 빠지는가. 확장자 없는 파일에서는.",
+        "삭제 대상에 [..]이 포함될 수 있는 경로가 있는가.",
+        "작업 진행 중 두 번째 작업 요청이 실제로 막히는가, 아니면 상태가 섞이는가.",
+        "작업 중 사용자가 경로를 바꾸거나 패널을 교환하면 어떤 경로에 작업이 적용되는가.",
+        "names 배열에 경로 구분자가 포함된 값을 Renderer가 보내면 Main이 거부하는가.",
+        "읽기 전용 파일, 숨김 파일, 260자 초과 경로에서 각 작업.",
+        "StatusBar 용량 집계가 폴더를 포함하거나 [..]을 세는가."
+      ],
+      "specRefs": ["SPEC §3.5", "SPEC §5", "SPEC §6", "SPEC §12.3"]
+    },
+    {
+      "id": "phase-08",
+      "order": 8,
+      "title": "마감과 패키징",
+      "status": "pending",
+      "dependsOn": ["phase-07"],
+      "mandatoryReview": false,
+      "scope": [
+        "drives.ts — C:부터 Z:까지 프로브, 짧은 타임아웃, 백그라운드 캐싱",
+        "fs.statfs() 용량 조회, DriveBar 표시, 지정 시점에만 갱신",
+        "Alt+F1 및 Alt+F2 드라이브 선택",
+        "icons.ts — app.getFileIcon()과 확장자 단위 캐싱",
+        "Light 테마 및 Ctrl+Shift+D 전환",
+        "마우스 — 클릭 선택, 더블클릭 열기",
+        "app.requestSingleInstanceLock()",
+        "globalShortcut 창 표시/숨김 토글",
+        "창 닫기를 종료가 아닌 숨김으로 처리",
+        "electron-builder portable 빌드",
+        "FunctionKeyBar 최종 확인"
+      ],
+      "acceptanceCriteria": [
+        "드라이브 용량이 여유 / 전체 형식으로 표시된다.",
+        "연결 끊긴 네트워크 드라이브가 있어도 앱 시작이 블로킹되지 않는다.",
+        "드라이브 용량 조회가 파일 목록 표시를 지연시키지 않는다.",
+        "파일 아이콘이 표시되고 5,000개 목록에서 확장자 수만큼만 조회된다.",
+        "Dark와 Light 테마를 전환할 수 있고 마지막 선택이 저장된다.",
+        "전역 핫키로 창이 표시되고 숨겨진다.",
+        "두 번째 인스턴스 실행 시 기존 창이 표시된다.",
+        "portable 빌드 산출물이 Windows 11에서 실행된다.",
+        "지정된 키 매핑이 SPEC §16 표대로 동작한다."
+      ],
+      "selfVerification": [
+        "존재하지 않는 네트워크 드라이브 매핑 후 기동 시간 측정",
+        "5,000개 목록에서 getFileIcon 호출 횟수 확인",
+        "portable 빌드 산출물을 다른 폴더로 옮겨 실행 확인",
+        "SPEC §16 키 매핑 전수 확인",
+        "BRIEF §12 완료 기준 체크리스트 전수 확인"
+      ],
+      "adversarialFocus": [
+        "드라이브 프로브 타임아웃이 실제로 걸리는가. fs 호출은 AbortSignal을 받지 않는 것이 많다. 타임아웃이 응답만 버리고 스레드는 계속 블로킹되는가.",
+        "전역 핫키가 다른 앱에 이미 점유된 경우. globalShortcut.register() 반환값을 확인하는가.",
+        "두 번째 인스턴스가 첫 인스턴스의 숨김 상태에서 실행되면.",
+        "창 숨김 상태에서 파일 작업이나 타이머가 계속 도는가.",
+        "아이콘 캐시가 실제로 확장자 단위인가, 아니면 경로 단위라 5,000번 호출되는가.",
+        "확장자 없는 파일과 대소문자가 다른 확장자의 캐시 키.",
+        "Light 테마에서 하드코딩된 색상이 남아 대비가 무너지는 컴포넌트가 있는가.",
+        "마우스 클릭이 키보드 포커스·선택 모델과 어긋나는 지점.",
+        "portable 빌드가 userData 경로를 어디로 잡는가. 폴더를 옮기면 설정을 잃는가.",
+        "BRIEF §12 완료 기준 중 실제로 검증되지 않은 항목을 찾아 지적하라."
+      ],
+      "specRefs": ["SPEC §3.2", "SPEC §10.3", "SPEC §10.4", "SPEC §14", "SPEC §16", "SPEC §19"]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build and packaging outputs
+out/
+dist/
+dist-electron/
+release/
+.electron-vite/
+
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+
+# Logs and diagnostic reports
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test and coverage outputs
+coverage/
+.nyc_output/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.serena/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Python helper-tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

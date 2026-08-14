@@ -1,0 +1,30 @@
+// Pure path helpers. No electron import here (SPEC.md §11.4) so this module
+// stays reachable by Vitest without an Electron runtime.
+
+import { isAbsolute, relative, sep } from 'node:path'
+
+const LONG_PATH_PREFIX = '\\\\?\\'
+const LONG_PATH_THRESHOLD = 260
+
+export function isWithinRoot(rootPath: string, candidatePath: string): boolean {
+  const relativePath = relative(rootPath, candidatePath)
+  return (
+    relativePath === '' ||
+    (!isAbsolute(relativePath) && !relativePath.startsWith(`..${sep}`) && relativePath !== '..')
+  )
+}
+
+// Windows case-insensitive comparison key for selection state and path
+// comparisons (SPEC.md §12.2).
+export function toComparableKey(name: string): string {
+  return name.toLowerCase()
+}
+
+// Prefixes absolute paths longer than the MAX_PATH threshold so Node's fs
+// APIs can address them on Windows (SPEC.md §12.1).
+export function toLongPathSafe(absolutePath: string): string {
+  if (absolutePath.length < LONG_PATH_THRESHOLD || absolutePath.startsWith(LONG_PATH_PREFIX)) {
+    return absolutePath
+  }
+  return LONG_PATH_PREFIX + absolutePath
+}

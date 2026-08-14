@@ -1,0 +1,67 @@
+import { app, BrowserWindow, session } from 'electron'
+import { join } from 'node:path'
+import { is } from '@electron-toolkit/utils'
+import { registerIpcHandlers } from './ipc'
+
+function configureContentSecurityPolicy(): void {
+  const policy = is.dev
+    ? "default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*"
+    : "default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [policy]
+      }
+    })
+  })
+}
+
+async function loadWindowContent(window: BrowserWindow): Promise<void> {
+  if (is.dev) {
+    const rendererUrl = process.env.ELECTRON_RENDERER_URL
+    if (!rendererUrl) throw new Error('ELECTRON_RENDERER_URL is required in development mode.')
+    await window.loadURL(rendererUrl)
+    return
+  }
+
+  await window.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+function createWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true
+    }
+  })
+
+  window.setMenuBarVisibility(false)
+  window.once('ready-to-show', () => window.show())
+  void loadWindowContent(window)
+
+  return window
+}
+
+app.whenReady().then(() => {
+  configureContentSecurityPolicy()
+  registerIpcHandlers()
+  createWindow()
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
