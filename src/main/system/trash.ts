@@ -10,10 +10,16 @@ import { toUserMessage } from '../filesystem/errorMessages'
 export type TrashItemFailure = { name: string; code: string; message: string }
 export type TrashResult = { succeeded: string[]; failed: TrashItemFailure[]; cancelled: boolean }
 
-export async function trashItems(dir: string, names: string[], signal: AbortSignal): Promise<TrashResult> {
+export async function trashItems(
+  dir: string,
+  names: string[],
+  signal: AbortSignal,
+  onProgress?: (currentFile: string, done: number) => void
+): Promise<TrashResult> {
   const succeeded: string[] = []
   const failed: TrashItemFailure[] = []
   let cancelled = false
+  let done = 0
 
   for (const name of names) {
     if (signal.aborted) {
@@ -26,6 +32,8 @@ export async function trashItems(dir: string, names: string[], signal: AbortSign
     } catch (error) {
       failed.push({ name, code: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN', message: toUserMessage(error) })
     }
+    done += 1
+    onProgress?.(name, done)
   }
 
   return { succeeded, failed, cancelled }

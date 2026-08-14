@@ -56,12 +56,20 @@ function assertPlainNames(names: unknown): string[] {
 // SPEC.md §12.3: Main confirms the destination exists before starting a
 // transfer instead of letting mkdir(recursive: true) silently fabricate a
 // missing destination tree (see A7 #11).
+function taggedError(code: string, message: string): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException
+  error.code = code
+  return error
+}
+
 async function assertExistingDirectory(path: string): Promise<void> {
   try {
     const stats = await lstat(path)
-    if (!stats.isDirectory()) throw new Error('대상이 폴더가 아닙니다')
+    if (!stats.isDirectory()) throw taggedError('ENOTDIR', '대상이 폴더가 아닙니다')
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('대상 경로를 찾을 수 없습니다')
+    // Preserve ENOENT (SPEC.md §12.3 requires it for a missing path) rather
+    // than flattening every failure into a generic error code (A7-3 #9).
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw taggedError('ENOENT', '대상 경로를 찾을 수 없습니다')
     throw error
   }
 }
@@ -160,7 +168,10 @@ export function registerIpcHandlers(): void {
   )
 
   function toFailureResult(error: unknown): OpResult {
-    return { ok: false, succeeded: [], failed: [{ name: '', code: 'ERROR', message: toUserMessage(error) }], cancelled: false }
+    const code = error && typeof error === 'object' && typeof (error as NodeJS.ErrnoException).code === 'string'
+      ? (error as NodeJS.ErrnoException).code!
+      : 'ERROR'
+    return { ok: false, succeeded: [], failed: [{ name: '', code, message: toUserMessage(error) }], cancelled: false }
   }
 
   // SPEC.md §6.8: rename/createDirectory share the same single-flight lock
@@ -204,12 +215,17 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('fs:copy', async (event, request: TransferRequest): Promise<OpResult> =>
     runExclusiveOp(request.opId, async () => {
+      // Registered before any `await` -- including assertExistingDirectory's
+      // own await -- so a `fs:cancel` for this opId can never arrive in the
+      // gap between taking the lock and having a controller to abort (A7-3
+      // #4). See runExclusive()/runExclusiveOp() for why this is safe from
+      // interleaving.
+      const controller = new AbortController()
+      controllers.set(request.opId, controller)
       const sourceDir = assertAbsolutePath(request.sourceDir)
       const destDir = assertAbsolutePath(request.destDir)
       await assertExistingDirectory(destDir)
       const names = assertPlainNames(request.names)
-      const controller = new AbortController()
-      controllers.set(request.opId, controller)
       const result = await copyItems({
         sourceDir,
         destDir,
@@ -224,12 +240,12 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('fs:move', async (event, request: TransferRequest): Promise<OpResult> =>
     runExclusiveOp(request.opId, async () => {
+      const controller = new AbortController()
+      controllers.set(request.opId, controller)
       const sourceDir = assertAbsolutePath(request.sourceDir)
       const destDir = assertAbsolutePath(request.destDir)
       await assertExistingDirectory(destDir)
       const names = assertPlainNames(request.names)
-      const controller = new AbortController()
-      controllers.set(request.opId, controller)
       const result = await moveItems({
         sourceDir,
         destDir,
@@ -242,15 +258,16 @@ export function registerIpcHandlers(): void {
     })
   )
 
-  ipcMain.handle('fs:delete', async (_event, request: DeleteRequest): Promise<OpResult> =>
+  ipcMain.handle('fs:delete', async (event, request: DeleteRequest): Promise<OpResult> =>
     runExclusiveOp(request.opId, async () => {
-      const dir = assertAbsolutePath(request.dir)
-      const names = assertPlainNames(request.names)
       const controller = new AbortController()
       controllers.set(request.opId, controller)
+      const dir = assertAbsolutePath(request.dir)
+      const names = assertPlainNames(request.names)
+      const onProgress = makeProgressReporter(request.opId, event)
       const result = request.permanent
-        ? await deletePermanently(dir, names, controller.signal)
-        : await trashItems(dir, names, controller.signal)
+        ? await deletePermanently(dir, names, controller.signal, onProgress)
+        : await trashItems(dir, names, controller.signal, onProgress)
       return { ok: result.failed.length === 0 && !result.cancelled, ...result }
     })
   )

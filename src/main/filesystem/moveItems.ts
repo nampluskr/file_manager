@@ -144,17 +144,25 @@ async function copyTreeForMove(srcPath: string, destPath: string, isDir: boolean
 // Verifies every non-symlink file was actually written before the source is
 // allowed to be deleted. Always stats the destination -- including for an
 // empty directory -- instead of trivially returning true when there are no
-// children to recurse into (A7 #4).
+// children to recurse into (A7 #4). Uses lstat() rather than stat() on the
+// destination and rejects a symlink/junction there outright: this code
+// never creates one, so if the destination has become one by the time
+// verification runs, either it was swapped out from under us (a TOCTOU
+// attack -- verifying through a junction back into the source would let a
+// forged verification pass and the real source get deleted) or something
+// else is very wrong. Either way, "not a plain file/directory" must fail
+// verification rather than be silently followed (see A7-3 Critical #1).
 async function verifyCopiedTree(srcPath: string, destPath: string, isDir: boolean): Promise<boolean> {
   if (!isDir) {
     const [srcStat, destStat] = await Promise.all([
       stat(toLongPathSafe(srcPath)),
-      stat(toLongPathSafe(destPath)).catch(() => null)
+      lstat(toLongPathSafe(destPath)).catch(() => null)
     ])
-    return destStat !== null && destStat.size === srcStat.size
+    if (!destStat || destStat.isSymbolicLink()) return false
+    return destStat.size === srcStat.size
   }
-  const destStat = await stat(toLongPathSafe(destPath)).catch(() => null)
-  if (!destStat || !destStat.isDirectory()) return false
+  const destStat = await lstat(toLongPathSafe(destPath)).catch(() => null)
+  if (!destStat || destStat.isSymbolicLink() || !destStat.isDirectory()) return false
 
   const children = await readdir(toLongPathSafe(srcPath), { withFileTypes: true })
   for (const child of children) {
@@ -166,21 +174,38 @@ async function verifyCopiedTree(srcPath: string, destPath: string, isDir: boolea
   return true
 }
 
+// "dest-occupied" is the one failure mode where destPath is left holding a
+// verified-complete copy of the new content: copy + verify both succeeded,
+// only the final source-delete step failed. Every other failure path always
+// cleans destPath back to empty before returning/throwing (see
+// cleanupPartialCopy() calls below), so callers -- specifically
+// moveWithOverwrite() -- can tell "safe to put the old destination back"
+// apart from "the new content is already sitting there for real" (A7-3 #6:
+// blindly restoring a backup over an occupied destPath collides with EEXIST
+// and strands the backup).
+type PerformMoveResult = 'moved' | 'failed' | 'dest-occupied'
+
+function reportCleanupFailure(cleaned: boolean, relativeLabel: string, ctx: MoveContext): void {
+  if (!cleaned) ctx.failed.push({ name: relativeLabel, code: 'ECLEANUP', message: '임시 복사본 정리에 실패했습니다' })
+}
+
 // Moves srcPath onto destPath, which must not already exist. Tries a plain
 // rename() first; on EXDEV, falls back to copy -> verify -> delete-original,
 // re-checking cancellation and catching every step's errors (not just
 // CancelledError) so a partial copy is always cleaned up rather than left
 // behind or silently propagated as an unhandled rejection (A7-2 #1 Major).
-async function performMove(srcPath: string, destPath: string, srcStats: Stats, relativeLabel: string, ctx: MoveContext): Promise<boolean> {
+// Every cleanupPartialCopy() call's own success/failure is also reported
+// (A7-3 #5 -- several of these previously discarded that return value).
+async function performMove(srcPath: string, destPath: string, srcStats: Stats, relativeLabel: string, ctx: MoveContext): Promise<PerformMoveResult> {
   try {
     await rename(toLongPathSafe(srcPath), toLongPathSafe(destPath))
     ctx.doneCount.value += 1
     ctx.onProgress(relativeLabel, ctx.doneCount.value)
-    return true
+    return 'moved'
   } catch (error) {
     if (errorCode(error) !== 'EXDEV') {
       ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
-      return false
+      return 'failed'
     }
   }
 
@@ -188,19 +213,18 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
   try {
     ok = await copyTreeForMove(srcPath, destPath, srcStats.isDirectory(), relativeLabel, ctx)
   } catch (error) {
-    await cleanupPartialCopy(destPath)
+    reportCleanupFailure(await cleanupPartialCopy(destPath), relativeLabel, ctx)
     if (error instanceof CancelledError) throw error
     ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
-    return false
+    return 'failed'
   }
   if (!ok) {
-    const cleaned = await cleanupPartialCopy(destPath)
-    if (!cleaned) ctx.failed.push({ name: relativeLabel, code: 'ECLEANUP', message: '이동 실패 후 임시 복사본 정리에 실패했습니다' })
-    return false
+    reportCleanupFailure(await cleanupPartialCopy(destPath), relativeLabel, ctx)
+    return 'failed'
   }
 
   if (ctx.signal.aborted) {
-    await cleanupPartialCopy(destPath)
+    reportCleanupFailure(await cleanupPartialCopy(destPath), relativeLabel, ctx)
     throw new CancelledError()
   }
 
@@ -208,9 +232,9 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
   try {
     verified = await verifyCopiedTree(srcPath, destPath, srcStats.isDirectory())
   } catch (error) {
-    await cleanupPartialCopy(destPath)
+    reportCleanupFailure(await cleanupPartialCopy(destPath), relativeLabel, ctx)
     ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: `복사 검증 중 오류: ${toUserMessage(error)}` })
-    return false
+    return 'failed'
   }
   if (!verified) {
     const cleaned = await cleanupPartialCopy(destPath)
@@ -219,7 +243,7 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
       code: 'EVERIFY',
       message: cleaned ? '복사 검증에 실패했습니다' : '복사 검증에 실패했으며 임시 복사본 정리에도 실패했습니다'
     })
-    return false
+    return 'failed'
   }
 
   if (ctx.signal.aborted) {
@@ -228,10 +252,12 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
     // but honoring the cancellation and leaving the source untouched is
     // the more conservative choice -- a duplicate is recoverable, a wrongly
     // deleted source is not.
-    await cleanupPartialCopy(destPath)
+    reportCleanupFailure(await cleanupPartialCopy(destPath), relativeLabel, ctx)
     throw new CancelledError()
   }
 
+  // From here on, destPath holds a verified-complete copy no matter what
+  // happens next -- nothing below this point may delete or clean it up.
   try {
     if (srcStats.isDirectory()) await rm(toLongPathSafe(srcPath), { recursive: true, force: false })
     else await unlink(toLongPathSafe(srcPath))
@@ -241,21 +267,25 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
       code: errorCode(error),
       message: `이동은 완료되었으나 원본 삭제에 실패했습니다: ${toUserMessage(error)}`
     })
-    return false
+    return 'dest-occupied'
   }
 
   ctx.doneCount.value += 1
   ctx.onProgress(relativeLabel, ctx.doneCount.value)
-  return true
+  return 'moved'
 }
 
 // Wraps performMove() with the overwrite-backup dance: the pre-existing
 // destination is renamed aside before the move attempt and only removed
-// once performMove() confirms success. Any failure OR exception (including
-// cancellation) restores the backup before propagating -- performMove()
-// only ever deletes the source after its destination write is verified, so
-// at the point of any non-success outcome the source is still guaranteed
-// intact and restoring the backup is always safe (A7-2 #2).
+// once performMove() confirms success. A plain failure (destPath left
+// empty) restores the backup; "dest-occupied" (A7-3 #6) instead discards
+// the now-superseded backup, since destPath already correctly holds the new
+// content and restoring would either collide (EEXIST) or wrongly discard
+// valid data. Any thrown exception (including cancellation) also restores
+// the backup -- performMove() never throws once it has reached the
+// "dest-occupied"-only zone below the last cancellation check, so an
+// exception always means destPath was left empty and restoring is safe
+// (A7-2 #2).
 async function moveWithOverwrite(srcPath: string, rawDestPath: string, srcStats: Stats, relativeLabel: string, ctx: MoveContext): Promise<boolean> {
   const backupPath = `${rawDestPath}.__fmgr_bak_${Date.now()}_${Math.random().toString(36).slice(2)}`
   try {
@@ -265,15 +295,19 @@ async function moveWithOverwrite(srcPath: string, rawDestPath: string, srcStats:
     return false
   }
 
-  let moved: boolean
+  let result: PerformMoveResult
   try {
-    moved = await performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
+    result = await performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
   } catch (error) {
     await restoreBackup(backupPath, rawDestPath, relativeLabel, ctx)
     throw error
   }
 
-  if (moved) {
+  if (result === 'dest-occupied') {
+    await rm(toLongPathSafe(backupPath), { recursive: true, force: true }).catch(() => {})
+    return false
+  }
+  if (result === 'moved') {
     await rm(toLongPathSafe(backupPath), { recursive: true, force: true }).catch(() => {})
     return true
   }
@@ -324,23 +358,32 @@ async function moveEntry(srcDir: string, destDir: string, name: string, relative
     const children = await readdir(toLongPathSafe(srcPath), { withFileTypes: true })
     let anyFailed = false
     let anyMoved = false
+    let anySkipped = false
     for (const child of children) {
       const childOutcome = await moveEntry(srcPath, rawDestPath, child.name, `${relativeLabel}\\${child.name}`, ctx)
       if (childOutcome === 'failed') anyFailed = true
-      if (childOutcome === 'moved') anyMoved = true
+      else if (childOutcome === 'moved') anyMoved = true
+      else anySkipped = true
     }
-    if (!anyFailed && anyMoved) {
+    // rmdir() is only even attempted when nothing was skipped -- a skip
+    // always leaves at least one item behind, so it would fail with
+    // ENOTEMPTY anyway; attempting it only for the fully-clean case avoids
+    // needing to distinguish "expected ENOTEMPTY" from a real error.
+    if (!anyFailed && !anySkipped) {
       try {
         await rmdir(toLongPathSafe(srcPath))
       } catch {
-        // Not actually empty (a sibling item may exist alongside the moved
-        // children) or otherwise busy: leave it, not an error.
+        // Busy or otherwise locked: leave it, not an error.
       }
     }
     if (anyFailed) return 'failed'
-    // A7-2 #5: a directory where every child was individually skipped (or
-    // that had no children at all) must not be reported as "moved" -- the
-    // source is genuinely unchanged.
+    // A7-3 #7 (and A7-2 #5): a directory is only reported "moved" when it
+    // is *fully* at the destination and gone from the source. Any skip --
+    // whether every child was skipped or just one -- leaves part of the
+    // directory behind at the source, so the whole directory must not be
+    // claimed as succeeded; report it as "skipped" instead (never appears
+    // in `failed` either, matching how an individually skipped item behaves).
+    if (anySkipped) return 'skipped'
     return anyMoved ? 'moved' : 'skipped'
   }
 
@@ -356,14 +399,20 @@ async function moveEntry(srcDir: string, destDir: string, name: string, relative
     if (resolved === 'cancel') throw new ConflictCancelledError()
     if (resolved === 'error') return 'failed'
 
-    const moved =
-      resolved === name
-        ? await moveWithOverwrite(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
-        : await performMove(srcPath, join(destDir, resolved), srcStats, relativeLabel, ctx)
-    return moved ? 'moved' : 'failed'
+    if (resolved === name) {
+      const moved = await moveWithOverwrite(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
+      return moved ? 'moved' : 'failed'
+    }
+    // "dest-occupied" (copy+verify succeeded, only the source delete
+    // failed) still counts as an overall failure here: the source was never
+    // cleaned up, so the move as a whole did not complete, even though the
+    // failure message already explains the destination has a valid copy.
+    const result = await performMove(srcPath, join(destDir, resolved), srcStats, relativeLabel, ctx)
+    return result === 'moved' ? 'moved' : 'failed'
   }
 
-  return (await performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)) ? 'moved' : 'failed'
+  const result = await performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
+  return result === 'moved' ? 'moved' : 'failed'
 }
 
 export async function moveItems(options: MoveOptions): Promise<TransferResult> {

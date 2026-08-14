@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -9,6 +9,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // failing partway through (used to verify overwrite-restore behavior).
 let forceExdevFor: string | null = null
 let forceCopyFailFor: string | null = null
+let forceUnlinkFailFor: string | null = null
+// Swaps a freshly-mkdir'd destination directory for a junction immediately
+// after it's created -- simulating a TOCTOU attacker racing the gap between
+// the copy step and the verify step. Windows allows creating a junction
+// without elevated privileges (unlike a file symlink), which is why this
+// attacks a directory rather than a single file.
+let swapDirWithJunctionAfterMkdirFor: { destPath: string; linkTarget: string } | null = null
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
@@ -28,6 +35,22 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         throw error
       }
       return actual.copyFile(from as string, to as string)
+    }),
+    unlink: vi.fn(async (path: unknown) => {
+      if (forceUnlinkFailFor && typeof path === 'string' && path === forceUnlinkFailFor) {
+        const error = new Error('EBUSY') as NodeJS.ErrnoException
+        error.code = 'EBUSY'
+        throw error
+      }
+      return actual.unlink(path as string)
+    }),
+    mkdir: vi.fn(async (path: unknown, options?: unknown) => {
+      const result = await actual.mkdir(path as string, options as Parameters<typeof actual.mkdir>[1])
+      if (swapDirWithJunctionAfterMkdirFor && path === swapDirWithJunctionAfterMkdirFor.destPath) {
+        await actual.rmdir(path as string)
+        await actual.symlink(swapDirWithJunctionAfterMkdirFor.linkTarget, path as string, 'junction')
+      }
+      return result
     })
   }
 })
@@ -44,6 +67,8 @@ describe('moveItems', () => {
   afterEach(async () => {
     forceExdevFor = null
     forceCopyFailFor = null
+    forceUnlinkFailFor = null
+    swapDirWithJunctionAfterMkdirFor = null
     if (sourceDir) await rm(sourceDir, { recursive: true, force: true })
     if (destDir) await rm(destDir, { recursive: true, force: true })
     sourceDir = ''
@@ -169,6 +194,39 @@ describe('moveItems', () => {
     expect(await readFile(join(sourceDir, 'a.txt'), 'utf8')).toBe('incoming')
   })
 
+  it('fails verification instead of following a destination directory swapped for a junction between copy and verify (A7-3 Critical #1)', async () => {
+    await setup()
+    await mkdir(join(sourceDir, 'dir'))
+    await writeFile(join(sourceDir, 'dir', 'a.txt'), 'secret-source-content')
+    const decoyDir = join(destDir, 'decoy')
+    await mkdir(decoyDir)
+    forceExdevFor = join(sourceDir, 'dir')
+    const destPath = join(destDir, 'dir')
+    swapDirWithJunctionAfterMkdirFor = { destPath, linkTarget: decoyDir }
+
+    let junctionCreated = true
+    await symlink(decoyDir, join(destDir, '__junction_probe__'), 'junction').catch(() => {
+      junctionCreated = false
+    })
+    if (!junctionCreated) return // environment cannot create junctions; skip rather than false-fail
+    await rm(join(destDir, '__junction_probe__'), { recursive: true, force: true })
+
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['dir'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: autoCancel
+    })
+
+    expect(result.succeeded).toEqual([])
+    expect(result.failed[0]).toMatchObject({ code: 'EVERIFY' })
+    // The source must survive: verification must not have been fooled into
+    // following the junction back to a directory that isn't the real copy.
+    expect(await readFile(join(sourceDir, 'dir', 'a.txt'), 'utf8')).toBe('secret-source-content')
+  })
+
   it('restores the destination file if overwrite is cancelled mid-fallback-copy (A7-2 #2)', async () => {
     await setup()
     await writeFile(join(sourceDir, 'a.txt'), 'incoming')
@@ -194,6 +252,34 @@ describe('moveItems', () => {
     expect(await readFile(join(sourceDir, 'a.txt'), 'utf8')).toBe('incoming')
   })
 
+  it('discards the superseded backup instead of colliding with it when only the post-verify source delete fails (A7-3 Major #6)', async () => {
+    await setup()
+    const srcPath = join(sourceDir, 'a.txt')
+    await writeFile(srcPath, 'incoming')
+    await writeFile(join(destDir, 'a.txt'), 'original')
+    forceExdevFor = srcPath
+    forceUnlinkFailFor = srcPath // the post-verify "delete original" step fails
+
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['a.txt'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: async () => ({ action: 'overwrite', applyToAll: false })
+    })
+
+    expect(result.succeeded).toEqual([])
+    expect(result.failed[0].message).toContain('원본 삭제')
+    // The destination must end up holding the new (verified) content, with
+    // no stray ".__fmgr_bak_*" file left stranded alongside it.
+    expect(await readFile(join(destDir, 'a.txt'), 'utf8')).toBe('incoming')
+    expect(await readdir(destDir)).toEqual(['a.txt'])
+    // Source deletion genuinely failed, so the source is still there too
+    // (a harmless duplicate, not a loss).
+    expect(await readFile(srcPath, 'utf8')).toBe('incoming')
+  })
+
   it('rejects a folder overwriting a same-named file, and vice versa, without touching either (A7-2 #6)', async () => {
     await setup()
     await mkdir(join(sourceDir, 'item'))
@@ -211,6 +297,31 @@ describe('moveItems', () => {
     expect(result.failed[0]).toMatchObject({ code: 'ETYPE' })
     expect(await readFile(join(destDir, 'item'), 'utf8')).toBe('a file, not a folder')
     expect(await readdir(join(sourceDir, 'item'))).toEqual([])
+  })
+
+  it('does not report a partially-skipped merge directory as succeeded (A7-3 Major #7)', async () => {
+    await setup()
+    await mkdir(join(sourceDir, 'dir'))
+    await writeFile(join(sourceDir, 'dir', 'x.txt'), 'skip-me')
+    await writeFile(join(sourceDir, 'dir', 'y.txt'), 'move-me')
+    await mkdir(join(destDir, 'dir'))
+    await writeFile(join(destDir, 'dir', 'x.txt'), 'existing')
+
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['dir'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: async () => ({ action: 'skip', applyToAll: false }) // only "x.txt" conflicts
+    })
+
+    expect(result.succeeded).toEqual([])
+    expect(result.failed).toEqual([])
+    // y.txt (no conflict) did move; x.txt (skipped) stayed at the source --
+    // the directory is genuinely split, so it must not be reported as moved.
+    expect(await readFile(join(destDir, 'dir', 'y.txt'), 'utf8')).toBe('move-me')
+    expect(await readFile(join(sourceDir, 'dir', 'x.txt'), 'utf8')).toBe('skip-me')
   })
 
   it('does not report a fully-skipped merge directory as succeeded (A7-2 #5)', async () => {
