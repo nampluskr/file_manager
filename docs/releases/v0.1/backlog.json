@@ -8,17 +8,17 @@
   "phaseStatusPolicy": "Phase completion is recorded only in each phase's status field. Do not duplicate phase status in README.md, BRIEF.md, PRD.md, SPEC.md, or PLAN.md.",
   "implementationLanguagePolicy": "Product functionality must be implemented in TypeScript. Python is not used for Electron or React application features and may only be used for optional development tooling such as test-data generation or verification automation.",
   "roleAssignment": {
-    "implementer": "Claude Code",
-    "adversarialReviewer": "Codex sol",
-    "rationale": "Implementer and reviewer are deliberately from different vendors. Splitting sessions within one model family still shares training bias and code idioms, leaving the failure mode where both miss the same defect."
+    "implementer": "Codex or Claude Code, according to the active working environment",
+    "adversarialReviewer": "The CLI from the opposite vendor of the phase's last substantive implementer",
+    "rationale": "Codex implementation is reviewed by Claude Sonnet headless CLI; Claude Code implementation is reviewed by Codex CLI. The implementer may change when token limits require it, but the reviewer remains the opposite vendor of the last substantive implementation. Splitting sessions within one model family still shares training bias and code idioms, leaving the failure mode where both miss the same defect."
   },
   "moduleBoundaryPolicy": "src/main/filesystem/* must not import electron. It uses only node:fs and node:path. Electron dependencies such as shell.trashItem are injected at the src/main/ipc/ layer. Violating this boundary makes the most dangerous code untestable under Vitest.",
   "phaseCompletionWorkflow": [
     "Implement the phase scope and verify its acceptance criteria (selfVerification).",
     "Commit the phase work and record the commit hash.",
-    "Request an adversarial review from Codex sol using only file-system context: the phase diff, the referenced SPEC sections, and the phase's adversarialFocus list. Do not pass the Claude session transcript or implementation rationale.",
-    "Codex sol records findings in docs/releases/v0.1/reviews/A{n}.md with Critical/Major/Minor severity, reproduction conditions, and violated SPEC clause. Codex sol must not modify code.",
-    "Claude Code fixes all Critical findings and reruns the same adversarial review to confirm resolution. Findings that are not accepted must be answered with a written rebuttal in the same review file.",
+    "Request an adversarial review from the opposite vendor of the phase's last substantive implementer using only file-system context: the phase diff, the referenced SPEC sections, and the phase's adversarialFocus list. Do not pass an implementation session transcript or rationale.",
+    "Use Claude Sonnet headless CLI after Codex implementation, or Codex CLI after Claude Code implementation. The reviewer records findings in docs/releases/v0.1/reviews/A{n}.md with Critical/Major/Minor severity, reproduction conditions, and violated SPEC clause, and must not modify code.",
+    "The current implementer fixes all Critical findings and reruns the same adversarial review to confirm resolution. Findings that are not accepted must be answered with a written rebuttal in the same review file.",
     "Report changes, verification results, and remaining Major/Minor findings to the user, then request approval.",
     "Only after user approval, push the completed phase to the remote repository."
   ],
@@ -29,9 +29,9 @@
     "phase-07"
   ],
   "mandatoryReviewRationale": "These phases cover command injection, data corruption, and data loss respectively. All three are irreversible, so no Critical finding may be deferred.",
-  "reviewFallback": "If Codex sol is unavailable, report the reason, propose an alternative reviewer or validation method, and request user approval before proceeding. Do not skip adversarial review on the mandatory phases.",
+  "reviewFallback": "If the required opposite-vendor CLI is unavailable, report the reason, propose an alternative reviewer or validation method, and request user approval before proceeding. Do not skip adversarial review on the mandatory phases.",
   "commitPolicy": "One approved completed phase per commit; do not push before user approval.",
-  "reviewFileTemplate": "docs/releases/v0.1/reviews/A{n}.md — must record target commit hash, reviewer model, run date, finding counts by severity, and per-finding reproduction/violation/resolution.",
+  "reviewFileTemplate": "docs/releases/v0.1/reviews/A{n}.md — must record target commit hash, last substantive implementer, reviewer CLI/model, run date, finding counts by severity, and per-finding reproduction/violation/resolution.",
   "phases": [
     {
       "id": "phase-00",

@@ -116,3 +116,41 @@ body {
 .file-row-date {
   text-align: right;
 }
+
+.command-launcher {
+  background: var(--command-bar);
+  border-top: 1px solid var(--border);
+  padding: 4px 8px;
+  outline: none;
+}
+
+.command-launcher-focused {
+  background: var(--focused-item);
+}
+
+.command-launcher-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.command-launcher button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  padding: 2px 7px;
+}
+
+.command-launcher-focused button:first-child {
+  border-color: var(--status-bar);
+}
+
+.command-launcher kbd {
+  color: var(--text-secondary);
+}
+
+.command-launcher-error {
+  color: var(--error-text);
+  margin-top: 4px;
+}

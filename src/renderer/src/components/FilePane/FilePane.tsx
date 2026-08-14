@@ -3,6 +3,7 @@ import type { KeyboardEvent, ReactElement } from 'react'
 import { useFilePane } from '../../hooks/useFilePane'
 import { FileList } from '../FileList/FileList'
 import { PathBar } from '../PathBar/PathBar'
+import { CommandLauncher } from '../CommandLauncher/CommandLauncher'
 
 const PRINTABLE_KEY_PATTERN = /^[\p{L}\p{N}]$/u
 
@@ -19,6 +20,7 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
   const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, setSort, setScrollTop, typeAhead } =
     useFilePane(initialPath)
   const [pageSize, setPageSize] = useState(10)
+  const [launcherFocused, setLauncherFocused] = useState(false)
   const paneRef = useRef<HTMLDivElement>(null)
 
   // Without this, Arrow/Enter/Backspace do nothing until the user clicks
@@ -29,6 +31,21 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.ctrlKey) {
+      if (event.key.toLowerCase() === 'l') {
+        event.preventDefault()
+        setLauncherFocused(true)
+        return
+      }
+      if (event.key.toLowerCase() === 't') {
+        event.preventDefault()
+        void window.fileManager.launch('cmd', state.currentPath)
+        return
+      }
+      if (event.key.toLowerCase() === 'e') {
+        event.preventDefault()
+        void window.fileManager.launch('code', state.currentPath)
+        return
+      }
       const sortKey = SORT_KEY_BY_FUNCTION_KEY[event.key]
       if (sortKey) {
         event.preventDefault()
@@ -36,6 +53,8 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
       }
       return
     }
+
+    if (launcherFocused) return
 
     switch (event.key) {
       case 'ArrowDown':
@@ -78,7 +97,15 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
   }
 
   return (
-    <div ref={paneRef} className="file-pane" tabIndex={0} onKeyDown={handleKeyDown}>
+    <div
+      ref={paneRef}
+      className="file-pane"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) setLauncherFocused(false)
+      }}
+    >
       <PathBar path={state.currentPath} />
       <div className="file-list-header">
         <span className="file-row-cell file-row-name">이름</span>
@@ -94,6 +121,7 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
         onScrollTopChange={setScrollTop}
         onVisibleRowCountChange={setPageSize}
       />
+      <CommandLauncher cwd={state.currentPath} focused={launcherFocused} onBlur={() => setLauncherFocused(false)} />
     </div>
   )
 }

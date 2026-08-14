@@ -2,8 +2,10 @@
 
 import { ipcMain, shell } from 'electron'
 import { isAbsolute, resolve } from 'node:path'
+import { execFile } from 'node:child_process'
 import { listDirectory } from '../filesystem/listDirectory'
 import { toUserMessage } from '../filesystem/errorMessages'
+import { isPresetId, launchPreset } from '../filesystem/launcher'
 import type { FileEntry } from '../../shared/types'
 
 // SPEC.md §12.3: Main validates every path a Renderer sends.
@@ -17,6 +19,12 @@ function assertAbsolutePath(requestedPath: string): string {
 }
 
 export function registerIpcHandlers(): void {
+  // The executable probe begins once during startup and its result is reused
+  // by every launcher request (SPEC.md §8.4.1).
+  const windowsTerminalAvailable = new Promise<boolean>((resolveProbe) => {
+    const probe = execFile('where.exe', ['wt.exe'], { windowsHide: true }, (error) => resolveProbe(!error))
+    probe.once('error', () => resolveProbe(false))
+  })
   ipcMain.handle(
     'fs:listDirectory',
     async (_event, requestedPath: string): Promise<{ path: string; entries: FileEntry[] }> => {
@@ -35,6 +43,38 @@ export function registerIpcHandlers(): void {
     const failureMessage = await shell.openPath(path)
     if (failureMessage) {
       console.error(`sys:openPath failed for ${path}: ${failureMessage}`)
+    }
+  })
+
+  ipcMain.handle('sys:launch', async (_event, preset: unknown, requestedPath: string) => {
+    if (!isPresetId(preset)) throw new Error('Unsupported launch preset.')
+    const cwd = assertAbsolutePath(requestedPath)
+    const hasWindowsTerminal = await windowsTerminalAvailable
+
+    try {
+      const process = launchPreset(preset, cwd, hasWindowsTerminal, (plan) =>
+        execFile(plan.command, plan.args, {
+          cwd: plan.cwd,
+          detached: true,
+          windowsHide: false
+        } as never, (error) => {
+          if (error) console.error(`sys:launch process failed for ${preset}:`, error)
+        })
+      )
+      await new Promise<void>((resolveLaunch, rejectLaunch) => {
+        process.once('spawn', () => resolveLaunch())
+        process.once('error', (error) => rejectLaunch(error))
+      })
+      return { ok: true, succeeded: [], failed: [], cancelled: false }
+    } catch (error) {
+      const message = toUserMessage(error)
+      console.error(`sys:launch failed for ${preset}:`, error)
+      return {
+        ok: false,
+        succeeded: [],
+        failed: [{ name: preset, code: 'LAUNCH_FAILED', message }],
+        cancelled: false
+      }
     }
   })
 }
