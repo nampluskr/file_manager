@@ -74,11 +74,21 @@ Codex sol을 사용할 수 없는 환경이면 그 사실과 사유를 사용자
 서브 에이전트가 PowerShell에서 실행할 기본 명령은 다음과 같다. `<phase>`, `<changed-files>`, `<adversarial-focus>`, `<spec-refs>`는 현재 작업 내용으로 대체한다.
 
 ```powershell
-codex exec --model sol --sandbox read-only --cd "D:\projects\tools\file_manager" "You are an adversarial reviewer for <phase>. Your job is to break this code, not to confirm it works. Review only these product source files: <changed-files>. Attack these specific points: <adversarial-focus>. Validate against these spec clauses: <spec-refs>. Do not inspect Git status, branches, remotes, or commit history, and do not use shell tools. For each finding, report severity (Critical/Major/Minor), exact reproduction conditions, and the violated spec clause. Order findings by severity. Do not modify any file."
+codex exec --sandbox read-only --cd "D:\projects\tools\file_manager" "You are an adversarial reviewer for <phase>. Your job is to break this code, not to confirm it works. Review only these product source files: <changed-files>. Attack these specific points: <adversarial-focus>. Validate against these spec clauses: <spec-refs>. Do not inspect Git status, branches, remotes, or commit history, and do not use shell tools. For each finding, report severity (Critical/Major/Minor), exact reproduction conditions, and the violated spec clause. Order findings by severity. Do not modify any file."
 ```
+
+추가로 물어볼 때는 `codex exec resume --last "<추가 질문>"`을 사용한다.
 
 Codex CLI 검토를 실행하는 외부 명령의 시간 제한은 기본 10분으로 설정한다.
 CLI 플래그는 Phase 0에서 `codex exec --help`로 실제 지원 여부를 확인하고, 다르면 이 문서를 갱신한다.
+
+**`--model sol` 사용 금지 (2026-08-14 확인).** 이 환경의 Codex CLI는 ChatGPT 계정 인증이며
+`sol` 모델이 `invalid_request_error`("The 'sol' model is not supported when using Codex with a
+ChatGPT account.")로 거부된다. `-m`/`--model`을 지정하지 않고 `~/.codex/config.toml`의 기본
+모델을 그대로 사용한다. "Codex sol"은 벤더가 다른 교차 검증자라는 역할 이름일 뿐, 특정 모델
+문자열을 가리키지 않는다. 이 결정은 `workflow-hub` 프로젝트(`docs/releases/v0.1/PLAN.md`,
+`SPEC.md`)에서 이미 같은 이유로 `--model` 플래그 없이 `codex exec --sandbox read-only`만 쓰고
+있는 것을 참고해 반영했다.
 
 ## Commit and Push Rules
 
