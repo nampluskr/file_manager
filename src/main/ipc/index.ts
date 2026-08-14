@@ -3,6 +3,7 @@
 import { app, ipcMain, shell } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { isAbsolute, resolve } from 'node:path'
+import { lstat } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { join } from 'node:path'
 import { listDirectory } from '../filesystem/listDirectory'
@@ -32,15 +33,37 @@ function assertAbsolutePath(requestedPath: string): string {
   return resolved
 }
 
-// SPEC.md §12.3: `names` carries file names only, never nested paths.
+// SPEC.md §12.3: `names` carries file names only, never nested paths. "." and
+// ".." must be rejected too -- otherwise join(dir, "..") walks straight out
+// of `dir` and a delete request can remove the parent directory (see A7 #1).
 function assertPlainNames(names: unknown): string[] {
   if (!Array.isArray(names) || names.length === 0) throw new Error('대상이 지정되지 않았습니다')
   for (const name of names) {
-    if (typeof name !== 'string' || name.length === 0 || name.includes('\\') || name.includes('/')) {
+    if (
+      typeof name !== 'string' ||
+      name.length === 0 ||
+      name === '.' ||
+      name === '..' ||
+      name.includes('\\') ||
+      name.includes('/')
+    ) {
       throw new Error('잘못된 파일명이 포함되어 있습니다')
     }
   }
   return names as string[]
+}
+
+// SPEC.md §12.3: Main confirms the destination exists before starting a
+// transfer instead of letting mkdir(recursive: true) silently fabricate a
+// missing destination tree (see A7 #11).
+async function assertExistingDirectory(path: string): Promise<void> {
+  try {
+    const stats = await lstat(path)
+    if (!stats.isDirectory()) throw new Error('대상이 폴더가 아닙니다')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('대상 경로를 찾을 수 없습니다')
+    throw error
+  }
 }
 
 export function registerIpcHandlers(): void {
@@ -110,7 +133,17 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // SPEC.md §6.8: rename/createDirectory also touch the tree a copy/move/
+  // delete may be working on, so they respect the same single-flight lock
+  // (see A7 #13).
+  function rejectIfBusy(): OpResult | null {
+    if (activeOpId === null) return null
+    return { ok: false, succeeded: [], failed: [{ name: '', code: 'EBUSY_OP', message: '다른 작업이 진행 중입니다' }], cancelled: false }
+  }
+
   ipcMain.handle('fs:createDirectory', async (_event, requestedPath: string, name: string): Promise<OpResult> => {
+    const busy = rejectIfBusy()
+    if (busy) return busy
     const dir = assertAbsolutePath(requestedPath)
     const result = await createDirectory(dir, name)
     return result.ok
@@ -119,6 +152,8 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('fs:rename', async (_event, requestedPath: string, from: string, to: string): Promise<OpResult> => {
+    const busy = rejectIfBusy()
+    if (busy) return busy
     const dir = assertAbsolutePath(requestedPath)
     assertPlainNames([from])
     assertPlainNames([to])
@@ -131,6 +166,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('fs:copy', async (event, request: TransferRequest): Promise<OpResult> => {
     const sourceDir = assertAbsolutePath(request.sourceDir)
     const destDir = assertAbsolutePath(request.destDir)
+    await assertExistingDirectory(destDir)
     const names = assertPlainNames(request.names)
     return runExclusiveTransfer(request.opId, event, async (controller) => {
       const result = await copyItems({
@@ -148,6 +184,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('fs:move', async (event, request: TransferRequest): Promise<OpResult> => {
     const sourceDir = assertAbsolutePath(request.sourceDir)
     const destDir = assertAbsolutePath(request.destDir)
+    await assertExistingDirectory(destDir)
     const names = assertPlainNames(request.names)
     return runExclusiveTransfer(request.opId, event, async (controller) => {
       const result = await moveItems({
@@ -175,6 +212,14 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('fs:cancel', async (_event, opId: string): Promise<void> => {
     controllers.get(opId)?.abort()
+    // Without this, cancelling while a conflict dialog is open leaves the
+    // operation's promise chain waiting forever and activeOpId never clears,
+    // permanently blocking every future transfer with EBUSY_OP (see A7 #8).
+    const resolveConflict = pendingConflicts.get(opId)
+    if (resolveConflict) {
+      pendingConflicts.delete(opId)
+      resolveConflict({ action: 'cancel', applyToAll: false })
+    }
   })
 
   ipcMain.handle('sys:openPath', async (_event, requestedPath: string): Promise<void> => {

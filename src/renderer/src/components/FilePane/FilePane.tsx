@@ -89,8 +89,7 @@ export function FilePane({
   const [inputValue, setInputValue] = useState('')
   const [dialogError, setDialogError] = useState<string | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
-  const stateRef = useRef(state)
-  stateRef.current = state
+  const dialogInputRef = useRef<HTMLInputElement>(null)
   const opIdRef = useRef<string | null>(null)
   const isFirstRefreshToken = useRef(true)
 
@@ -134,27 +133,54 @@ export function FilePane({
     }
   }, [])
 
+  // SPEC.md §6.4: renaming a file starts with only the basename selected
+  // (extension left untouched); a folder or the new-folder prompt selects
+  // the whole name (see A7 #16).
+  useEffect(() => {
+    if (!dialog || (dialog.kind !== 'rename' && dialog.kind !== 'newFolder')) return
+    const input = dialogInputRef.current
+    if (!input) return
+    input.focus()
+    if (dialog.kind === 'rename') {
+      const entry = state.entries.find((candidate) => candidate.name === dialog.name)
+      const dotIndex = dialog.name.lastIndexOf('.')
+      if (!entry?.isDirectory && dotIndex > 0) {
+        input.setSelectionRange(0, dotIndex)
+        return
+      }
+    }
+    input.select()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialog])
+
   function finishOperation(result: OpResult): void {
     opIdRef.current = null
-    setDialog(result.failed.length > 0 || result.cancelled ? { kind: 'message', text: summarizeResult(result) } : null)
+    // SPEC.md §6.1 step 6: always show the success/failure summary, not just
+    // on failure -- an empty confirmation of "성공 N개" is still the report
+    // the user was promised (see A7 #14).
+    setDialog({ kind: 'message', text: summarizeResult(result) })
     refresh()
     onOperationComplete()
   }
 
-  async function runTransfer(mode: 'copy' | 'move', names: string[], destDir: string): Promise<void> {
+  // sourceDir/dir are taken from the confirmation dialog the user actually
+  // saw, not the pane's live currentPath -- otherwise switching panes or
+  // paths between "dialog open" and "confirm click" would silently redirect
+  // the operation to a different directory than what was shown (A7 #12).
+  async function runTransfer(mode: 'copy' | 'move', sourceDir: string, names: string[], destDir: string): Promise<void> {
     const opId = makeOpId()
     opIdRef.current = opId
     setDialog({ kind: 'progress', opId, label: mode === 'copy' ? '복사 중' : '이동 중', total: names.length, done: 0, currentFile: '' })
-    const request: TransferRequest = { opId, sourceDir: stateRef.current.currentPath, names, destDir }
+    const request: TransferRequest = { opId, sourceDir, names, destDir }
     const result = mode === 'copy' ? await window.fileManager.copy(request) : await window.fileManager.move(request)
     finishOperation(result)
   }
 
-  async function runDelete(names: string[], permanent: boolean): Promise<void> {
+  async function runDelete(dir: string, names: string[], permanent: boolean): Promise<void> {
     const opId = makeOpId()
     opIdRef.current = opId
     setDialog({ kind: 'progress', opId, label: permanent ? '영구 삭제 중' : '휴지통으로 이동 중', total: names.length, done: 0, currentFile: '' })
-    const result = await window.fileManager.deleteItems({ opId, dir: stateRef.current.currentPath, names, permanent })
+    const result = await window.fileManager.deleteItems({ opId, dir, names, permanent })
     finishOperation(result)
   }
 
@@ -453,7 +479,7 @@ export function FilePane({
               <>
                 <div className="op-dialog-title">{dialog.kind === 'rename' ? '이름 변경' : '새 폴더'}</div>
                 <input
-                  autoFocus
+                  ref={dialogInputRef}
                   value={inputValue}
                   onChange={(event) => setInputValue(event.target.value)}
                   onKeyDown={(event) => event.stopPropagation()}
@@ -470,7 +496,7 @@ export function FilePane({
                 <div className="op-dialog-title">{dialog.permanent ? '영구 삭제' : '휴지통으로 삭제'}</div>
                 <div className="op-dialog-body">{dialog.names.join(', ')}</div>
                 <div className="op-dialog-buttons">
-                  <button type="button" onClick={() => void runDelete(dialog.names, dialog.permanent)}>삭제</button>
+                  <button type="button" onClick={() => void runDelete(dialog.dir, dialog.names, dialog.permanent)}>삭제</button>
                   <button type="button" onClick={() => setDialog(null)}>취소</button>
                 </div>
               </>
@@ -483,7 +509,7 @@ export function FilePane({
                   <br />→ {dialog.destDir}
                 </div>
                 <div className="op-dialog-buttons">
-                  <button type="button" onClick={() => void runTransfer(dialog.mode, dialog.names, dialog.destDir)}>확인</button>
+                  <button type="button" onClick={() => void runTransfer(dialog.mode, dialog.sourceDir, dialog.names, dialog.destDir)}>확인</button>
                   <button type="button" onClick={() => setDialog(null)}>취소</button>
                 </div>
               </>

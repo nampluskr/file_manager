@@ -1,8 +1,8 @@
 // Pure copy engine (SPEC.md §6.2). No electron import (SPEC.md §11.4).
 
-import { copyFile, lstat, mkdir, readdir } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, readdir, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { isSubPath, toComparableKey, toLongPathSafe } from './pathUtils'
+import { isSubPath, isSubPathReal, toComparableKey, toLongPathSafe } from './pathUtils'
 import { toUserMessage } from './errorMessages'
 import { nextConflictFreeName } from './nameConflict'
 
@@ -46,21 +46,30 @@ type CopyContext = {
   onConflict: ConflictResolver
   doneCount: { value: number }
   failed: TransferItemFailure[]
-  applyAll: ConflictDecision | null
+  // Keyed by conflict kind: "적용 대상은 동일 유형의 충돌"(SPEC.md §6.6) --
+  // an applyToAll decision made for a file conflict must not also answer a
+  // later folder conflict (see A7 #9).
+  applyAll: Partial<Record<ConflictKind, ConflictDecision>>
 }
 
-// Resolves a name/skip/cancel decision for a single conflicting entry.
-// Returns the (possibly renamed) target name, 'skip', or null for cancel.
-async function resolveConflict(name: string, kind: ConflictKind, destDir: string, ctx: CopyContext): Promise<string | 'skip' | null> {
-  let decision = ctx.applyAll
+// Resolves a name/skip/cancel/error decision for a single conflicting entry.
+// Returns the (possibly renamed) target name, 'skip', 'cancel', or 'error'
+// (auto-rename exhausted its candidate range; already recorded in ctx.failed).
+async function resolveConflict(name: string, kind: ConflictKind, destDir: string, ctx: CopyContext): Promise<string | 'skip' | 'cancel' | 'error'> {
+  let decision = ctx.applyAll[kind]
   if (!decision) {
     decision = await ctx.onConflict(name, kind)
-    if (decision.applyToAll) ctx.applyAll = decision
+    if (decision.applyToAll) ctx.applyAll[kind] = decision
   }
-  if (decision.action === 'cancel') return null
+  if (decision.action === 'cancel') return 'cancel'
   if (decision.action === 'skip') return 'skip'
   if (decision.action === 'overwrite') return name
-  return nextConflictFreeName(name, async (candidate) => (await pathExists(join(destDir, candidate))) !== null)
+  try {
+    return await nextConflictFreeName(name, async (candidate) => (await pathExists(join(destDir, candidate))) !== null)
+  } catch (error) {
+    ctx.failed.push({ name, code: 'ERENAME_EXHAUSTED', message: toUserMessage(error) })
+    return 'error'
+  }
 }
 
 async function copyEntry(srcDir: string, destDir: string, name: string, relativeLabel: string, ctx: CopyContext): Promise<boolean> {
@@ -98,11 +107,19 @@ async function copyEntry(srcDir: string, destDir: string, name: string, relative
     if (existing === 'file') {
       const resolved = await resolveConflict(name, 'file', destDir, ctx)
       if (resolved === 'skip') return true
-      if (resolved === null) throw new ConflictCancelledError()
+      if (resolved === 'cancel') throw new ConflictCancelledError()
+      if (resolved === 'error') return false
       targetName = resolved
     }
-    // existing === 'dir': merge silently, no prompt (SPEC.md §6.2).
+    // existing === 'dir': merge silently, no prompt (SPEC.md §6.2). A
+    // junction/reparse point can alias this "existing" directory to
+    // somewhere inside srcPath even though the string paths look unrelated
+    // (see A7 #5), so the recursion guard is re-checked with realpath here.
     const finalDestPath = join(destDir, targetName)
+    if (existing === 'dir' && (await isSubPathReal(srcPath, finalDestPath))) {
+      ctx.failed.push({ name: relativeLabel, code: 'ERECURSIVE', message: '대상이 원본의 하위 폴더입니다' })
+      return false
+    }
     try {
       await mkdir(toLongPathSafe(finalDestPath), { recursive: true })
     } catch (error) {
@@ -123,20 +140,25 @@ async function copyEntry(srcDir: string, destDir: string, name: string, relative
   if (existing) {
     const resolved = await resolveConflict(name, existing, destDir, ctx)
     if (resolved === 'skip') return true
-    if (resolved === null) throw new ConflictCancelledError()
+    if (resolved === 'cancel') throw new ConflictCancelledError()
+    if (resolved === 'error') return false
     targetName = resolved
   }
 
   const finalDestPath = toLongPathSafe(join(destDir, targetName))
   try {
     await copyFile(safeSrcPath, finalDestPath)
-    ctx.doneCount.value += 1
-    ctx.onProgress(relativeLabel, ctx.doneCount.value)
-    return true
   } catch (error) {
     ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
     return false
   }
+  if (ctx.signal.aborted) {
+    await rm(finalDestPath, { force: true }).catch(() => {})
+    throw new CancelledError()
+  }
+  ctx.doneCount.value += 1
+  ctx.onProgress(relativeLabel, ctx.doneCount.value)
+  return true
 }
 
 export async function copyItems(options: CopyOptions): Promise<TransferResult> {
@@ -146,7 +168,7 @@ export async function copyItems(options: CopyOptions): Promise<TransferResult> {
     onConflict: options.onConflict,
     doneCount: { value: 0 },
     failed: [],
-    applyAll: null
+    applyAll: {}
   }
   const succeeded: string[] = []
   let cancelled = false

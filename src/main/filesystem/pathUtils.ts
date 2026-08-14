@@ -1,6 +1,8 @@
 // Pure path helpers. No electron import here (SPEC.md §11.4) so this module
 // stays reachable by Vitest without an Electron runtime.
 
+import { realpath } from 'node:fs/promises'
+
 const LONG_PATH_PREFIX = '\\\\?\\'
 const LONG_PATH_THRESHOLD = 260
 
@@ -31,4 +33,24 @@ export function isSubPath(parent: string, child: string): boolean {
   const parentKey = toComparableKey(parent).replace(/[\\/]+$/, '')
   const childKey = toComparableKey(child).replace(/[\\/]+$/, '')
   return childKey === parentKey || childKey.startsWith(`${parentKey}\\`)
+}
+
+// isSubPath() above is a string-only comparison, so a junction/reparse point
+// that *aliases* a path inside the source (e.g. "C:\alias" -> "C:\source\x")
+// slips past it undetected, letting copy/move recurse into itself through
+// the alias. This resolves both sides through the file system first, so an
+// existing destination directory whose real target lives inside the source
+// tree is caught even when the string paths look unrelated. Only meaningful
+// when `child` already exists (a not-yet-created plain directory cannot be a
+// junction).
+export async function isSubPathReal(parent: string, child: string): Promise<boolean> {
+  try {
+    const [parentReal, childReal] = await Promise.all([
+      realpath(toLongPathSafe(parent)),
+      realpath(toLongPathSafe(child))
+    ])
+    return isSubPath(parentReal, childReal)
+  } catch {
+    return false
+  }
 }

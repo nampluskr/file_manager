@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // Simulates a cross-volume move (EXDEV) without needing two real drives:
 // `rename` is made to fail with EXDEV whenever the source path is flagged.
+// `copyFile` can also be made to fail, to simulate the EXDEV fallback itself
+// failing partway through (used to verify overwrite-restore behavior).
 let forceExdevFor: string | null = null
+let forceCopyFailFor: string | null = null
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
@@ -17,6 +20,14 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         throw error
       }
       return actual.rename(from as string, to as string)
+    }),
+    copyFile: vi.fn(async (from: unknown, to: unknown) => {
+      if (forceCopyFailFor && typeof from === 'string' && from.includes(forceCopyFailFor)) {
+        const error = new Error('EIO') as NodeJS.ErrnoException
+        error.code = 'EIO'
+        throw error
+      }
+      return actual.copyFile(from as string, to as string)
     })
   }
 })
@@ -32,6 +43,7 @@ describe('moveItems', () => {
 
   afterEach(async () => {
     forceExdevFor = null
+    forceCopyFailFor = null
     if (sourceDir) await rm(sourceDir, { recursive: true, force: true })
     if (destDir) await rm(destDir, { recursive: true, force: true })
     sourceDir = ''
@@ -129,6 +141,60 @@ describe('moveItems', () => {
     })
     expect(result.succeeded).toEqual(['dir'])
     expect((await readdir(join(destDir, 'dir'))).sort()).toEqual(['existing.txt', 'new.txt'])
+  })
+
+  it('restores the original destination file if an overwrite fails partway through (A7 #2)', async () => {
+    await setup()
+    await writeFile(join(sourceDir, 'a.txt'), 'incoming')
+    await writeFile(join(destDir, 'a.txt'), 'original')
+    forceExdevFor = join(sourceDir, 'a.txt')
+    forceCopyFailFor = join(sourceDir, 'a.txt')
+
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['a.txt'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: async () => ({ action: 'overwrite', applyToAll: false })
+    })
+
+    expect(result.succeeded).toEqual([])
+    expect(result.failed.length).toBeGreaterThan(0)
+    // The pre-existing destination file must survive an overwrite that never completed.
+    expect(await readFile(join(destDir, 'a.txt'), 'utf8')).toBe('original')
+    // No backup artifact should be left behind alongside the restored file.
+    expect(await readdir(destDir)).toEqual(['a.txt'])
+    // And the source, which was never confirmed copied, must also survive.
+    expect(await readFile(join(sourceDir, 'a.txt'), 'utf8')).toBe('incoming')
+  })
+
+  it('scopes applyToAll to the conflict kind it was decided for (A7 #9)', async () => {
+    await setup()
+    await writeFile(join(sourceDir, 'a.txt'), 'new-a')
+    await writeFile(join(destDir, 'a.txt'), 'old-a')
+    await mkdir(join(sourceDir, 'dir'))
+    await writeFile(join(sourceDir, 'dir', 'inner.txt'), 'new-inner')
+    await mkdir(join(destDir, 'dir'))
+    await writeFile(join(destDir, 'dir', 'existing.txt'), 'existing')
+
+    const seenKinds: string[] = []
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['a.txt', 'dir'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: async (_name, kind) => {
+        seenKinds.push(kind)
+        return { action: 'overwrite', applyToAll: true }
+      }
+    })
+
+    expect(result.succeeded.sort()).toEqual(['a.txt', 'dir'])
+    // dir/dir never prompts (silent merge); only the file conflict should have asked.
+    expect(seenKinds).toEqual(['file'])
+    expect((await readdir(join(destDir, 'dir'))).sort()).toEqual(['existing.txt', 'inner.txt'])
   })
 
   it('allows the remaining items to proceed after one item fails (partial failure)', async () => {

@@ -161,6 +161,34 @@ describe('copyItems', () => {
     expect(await readFile(join(destDir, 'a (2).txt'), 'utf8')).toBe('new')
   })
 
+  it('scopes applyToAll to the conflict kind it was decided for (A7 #9)', async () => {
+    await setup()
+    await writeFile(join(sourceDir, 'a.txt'), 'new-a')
+    await writeFile(join(destDir, 'a.txt'), 'old-a')
+    await mkdir(join(sourceDir, 'dir'))
+    await writeFile(join(sourceDir, 'dir', 'inner.txt'), 'new-inner')
+    await mkdir(join(destDir, 'dir'))
+    await writeFile(join(destDir, 'dir', 'existing.txt'), 'existing')
+
+    const seenKinds: string[] = []
+    const result = await copyItems({
+      sourceDir,
+      destDir,
+      names: ['a.txt', 'dir'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: async (_name, kind) => {
+        seenKinds.push(kind)
+        return { action: 'overwrite', applyToAll: true }
+      }
+    })
+
+    expect(result.succeeded.sort()).toEqual(['a.txt', 'dir'])
+    // dir/dir never prompts (silent merge); only the file conflict should have asked.
+    expect(seenKinds).toEqual(['file'])
+    expect((await readdir(join(destDir, 'dir'))).sort()).toEqual(['existing.txt', 'inner.txt'])
+  })
+
   it('allows the remaining items to proceed after one item fails (partial failure)', async () => {
     await setup()
     await writeFile(join(sourceDir, 'ok.txt'), 'ok')
