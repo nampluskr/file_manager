@@ -33,7 +33,7 @@
       "id": "phase-00",
       "order": 0,
       "title": "환경 구성과 프로젝트 기반",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": [],
       "mandatoryReview": false,
       "scope": [
