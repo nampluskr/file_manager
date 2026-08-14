@@ -6,8 +6,10 @@ import { getParentPath, joinPath, lastSegment } from '../state/pathHelpers'
 
 const TYPE_AHEAD_RESET_MS = 1000
 
-export function useFilePane(initialPath: string) {
-  const [state, dispatch] = useReducer(paneReducer, initialPath, createInitialPaneState)
+export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name', initialSortAsc = true) {
+  const [state, dispatch] = useReducer(paneReducer, initialPath, (path) =>
+    createInitialPaneState(path, initialSortKey, initialSortAsc)
+  )
   const typeAheadBufferRef = useRef('')
   const typeAheadTimerRef = useRef<number | null>(null)
   // Guards against an in-flight listDirectory response from an earlier
@@ -61,6 +63,13 @@ export function useFilePane(initialPath: string) {
   const moveFocusToEdge = useCallback((edge: 'home' | 'end') => dispatch({ type: 'moveFocusToEdge', edge }), [])
   const setSort = useCallback((key: SortKey) => dispatch({ type: 'setSort', key }), [])
   const setScrollTop = useCallback((value: number) => dispatch({ type: 'setScrollTop', value }), [])
+  const refresh = useCallback(() => {
+    const focused = state.entries[state.focusedIndex]
+    navigate(
+      state.currentPath,
+      focused ? { mode: 'byName', name: focused.name, previousIndex: state.focusedIndex } : { mode: 'first' }
+    )
+  }, [navigate, state.currentPath, state.entries, state.focusedIndex])
 
   const typeAhead = useCallback(
     (char: string) => {
@@ -84,5 +93,7 @@ export function useFilePane(initialPath: string) {
     [state.entries]
   )
 
-  return { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, setSort, setScrollTop, typeAhead }
+  const goToPath = useCallback((path: string) => navigate(path, { mode: 'first' }), [navigate])
+
+  return { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, goToPath, setSort, setScrollTop, typeAhead, refresh }
 }

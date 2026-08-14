@@ -35,15 +35,15 @@ function buildDisplayEntries(rawEntries: FileEntry[], path: string, sortKey: Sor
   return getParentPath(path) === null ? sorted : [PARENT_ENTRY, ...sorted]
 }
 
-export function createInitialPaneState(path: string): PaneState {
+export function createInitialPaneState(path: string, sortKey: SortKey = 'name', sortAsc = true): PaneState {
   return {
     currentPath: path,
     entries: [],
     focusedIndex: 0,
     selectedNames: new Set(),
     scrollTop: 0,
-    sortKey: 'name',
-    sortAsc: true,
+    sortKey,
+    sortAsc,
     isLoading: true,
     error: null
   }

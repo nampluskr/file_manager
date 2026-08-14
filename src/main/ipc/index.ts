@@ -1,15 +1,17 @@
 // Electron dependencies are injected only at this layer (SPEC.md §11.4).
 
-import { ipcMain, shell } from 'electron'
+import { app, ipcMain, shell } from 'electron'
 import { isAbsolute, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
+import { join } from 'node:path'
 import { listDirectory } from '../filesystem/listDirectory'
 import { toUserMessage } from '../filesystem/errorMessages'
 import { isPresetId, launchPreset } from '../filesystem/launcher'
 import { readTextFile } from '../filesystem/readTextFile'
 import { writeTextFile } from '../filesystem/writeTextFile'
+import { createDefaultSettings, restoreSettings, saveSettings } from '../config/settings'
 import type { WriteTextRequest } from '../../shared/ipc'
-import type { FileEntry } from '../../shared/types'
+import type { FileEntry, Settings } from '../../shared/types'
 
 // SPEC.md §12.3: Main validates every path a Renderer sends.
 function assertAbsolutePath(requestedPath: string): string {
@@ -23,6 +25,8 @@ function assertAbsolutePath(requestedPath: string): string {
 }
 
 export function registerIpcHandlers(): void {
+  const settingsPath = join(app.getPath('userData'), 'settings.json')
+  const defaultSettings = createDefaultSettings(app.getPath('home'))
   // The executable probe begins once during startup and its result is reused
   // by every launcher request (SPEC.md §8.4.1).
   const windowsTerminalAvailable = new Promise<boolean>((resolveProbe) => {
@@ -104,5 +108,10 @@ export function registerIpcHandlers(): void {
         cancelled: false
       }
     }
+  })
+
+  ipcMain.handle('config:load', async (): Promise<Settings> => restoreSettings(settingsPath, defaultSettings))
+  ipcMain.handle('config:save', async (_event, settings: Settings): Promise<void> => {
+    await saveSettings(settingsPath, settings)
   })
 }
