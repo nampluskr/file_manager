@@ -81,7 +81,7 @@ export function FileList({
             <FileRow
               key={entry.name}
               top={index * ROW_HEIGHT}
-              name={entry.name}
+              name={entry.isParent ? '[..]' : entry.name}
               ext={entry.ext}
               sizeLabel={formatSize(entry.size, entry.isDirectory)}
               dateLabel={formatDate(entry.mtime)}

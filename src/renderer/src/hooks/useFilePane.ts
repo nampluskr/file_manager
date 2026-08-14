@@ -10,13 +10,21 @@ export function useFilePane(initialPath: string) {
   const [state, dispatch] = useReducer(paneReducer, initialPath, createInitialPaneState)
   const typeAheadBufferRef = useRef('')
   const typeAheadTimerRef = useRef<number | null>(null)
+  // Guards against an in-flight listDirectory response from an earlier
+  // navigate() call overwriting a later one that resolves first (SPEC.md §4.1).
+  const requestIdRef = useRef(0)
 
   const navigate = useCallback((path: string, focus: FocusIntent) => {
+    const requestId = ++requestIdRef.current
     dispatch({ type: 'loadStart' })
     window.fileManager
       .listDirectory(path)
-      .then((result) => dispatch({ type: 'loadSuccess', path: result.path, rawEntries: result.entries, focus }))
+      .then((result) => {
+        if (requestIdRef.current !== requestId) return
+        dispatch({ type: 'loadSuccess', path: result.path, rawEntries: result.entries, focus })
+      })
       .catch((error: unknown) => {
+        if (requestIdRef.current !== requestId) return
         const message = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
         dispatch({ type: 'loadError', message })
       })

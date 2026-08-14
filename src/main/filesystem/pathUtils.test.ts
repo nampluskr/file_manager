@@ -21,4 +21,14 @@ describe('toLongPathSafe', () => {
     const prefixed = '\\\\?\\C:\\' + 'a'.repeat(260)
     expect(toLongPathSafe(prefixed)).toBe(prefixed)
   })
+
+  it('uses the "\\\\?\\UNC\\" form for a long UNC path', () => {
+    const uncPath = '\\\\server\\share\\' + 'a'.repeat(260)
+    expect(toLongPathSafe(uncPath)).toBe('\\\\?\\UNC\\server\\share\\' + 'a'.repeat(260))
+  })
+
+  it('does not double-prefix an already-prefixed UNC path', () => {
+    const prefixed = '\\\\?\\UNC\\server\\share\\' + 'a'.repeat(260)
+    expect(toLongPathSafe(prefixed)).toBe(prefixed)
+  })
 })

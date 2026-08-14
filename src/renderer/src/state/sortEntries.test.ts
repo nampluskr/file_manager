@@ -35,6 +35,15 @@ describe('naturalCompare', () => {
   it('treats a shorter prefix as smaller when tokens otherwise match', () => {
     expect(naturalCompare('file', 'file2')).toBeLessThan(0)
   })
+
+  it('distinguishes numeric names beyond Number.MAX_SAFE_INTEGER', () => {
+    expect(naturalCompare('9007199254740992', '9007199254740993')).toBeLessThan(0)
+    expect(naturalCompare('9007199254740993', '9007199254740992')).toBeGreaterThan(0)
+  })
+
+  it('breaks a magnitude tie by fewer leading zeros first', () => {
+    expect(naturalCompare('007', '7')).toBeGreaterThan(0)
+  })
 })
 
 describe('sortEntries', () => {

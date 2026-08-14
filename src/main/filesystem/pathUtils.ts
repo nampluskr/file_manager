@@ -11,10 +11,15 @@ export function toComparableKey(name: string): string {
 }
 
 // Prefixes absolute paths longer than the MAX_PATH threshold so Node's fs
-// APIs can address them on Windows (SPEC.md §12.1).
+// APIs can address them on Windows (SPEC.md §12.1). UNC paths need the
+// "\\?\UNC\" form -- naively prepending "\\?\" to "\\server\share\..."
+// produces an invalid "\\?\\\server\share\..." path.
 export function toLongPathSafe(absolutePath: string): string {
   if (absolutePath.length < LONG_PATH_THRESHOLD || absolutePath.startsWith(LONG_PATH_PREFIX)) {
     return absolutePath
+  }
+  if (absolutePath.startsWith('\\\\')) {
+    return `\\\\?\\UNC\\${absolutePath.slice(2)}`
   }
   return LONG_PATH_PREFIX + absolutePath
 }

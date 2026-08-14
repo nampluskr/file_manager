@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactElement } from 'react'
 import { useFilePane } from '../../hooks/useFilePane'
 import { FileList } from '../FileList/FileList'
@@ -19,6 +19,13 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
   const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, setSort, setScrollTop, typeAhead } =
     useFilePane(initialPath)
   const [pageSize, setPageSize] = useState(10)
+  const paneRef = useRef<HTMLDivElement>(null)
+
+  // Without this, Arrow/Enter/Backspace do nothing until the user clicks
+  // the pane or tabs into it (SPEC.md §4.3 expects them to work immediately).
+  useEffect(() => {
+    paneRef.current?.focus()
+  }, [])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.ctrlKey) {
@@ -71,7 +78,7 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
   }
 
   return (
-    <div className="file-pane" tabIndex={0} onKeyDown={handleKeyDown}>
+    <div ref={paneRef} className="file-pane" tabIndex={0} onKeyDown={handleKeyDown}>
       <PathBar path={state.currentPath} />
       <div className="file-list-header">
         <span className="file-row-cell file-row-name">이름</span>
