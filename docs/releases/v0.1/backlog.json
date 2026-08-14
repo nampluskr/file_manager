@@ -279,7 +279,7 @@
       "id": "phase-05",
       "order": 5,
       "title": "즐겨찾기 · 경로 복원 · 새로고침",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": [
         "phase-04"
       ],
