@@ -11,13 +11,15 @@ type FileRowProps = {
   dateLabel: string
   isDirectory: boolean
   isFocused: boolean
+  isSelected: boolean
 }
 
-function FileRowComponent({ top, name, ext, sizeLabel, dateLabel, isDirectory, isFocused }: FileRowProps): ReactElement {
+function FileRowComponent({ top, name, ext, sizeLabel, dateLabel, isDirectory, isFocused, isSelected }: FileRowProps): ReactElement {
   const className = [
     'file-row',
     isDirectory ? 'file-row-directory' : '',
-    isFocused ? 'file-row-focused' : ''
+    isFocused ? 'file-row-focused' : '',
+    isSelected ? 'file-row-selected' : ''
   ]
     .filter(Boolean)
     .join(' ')

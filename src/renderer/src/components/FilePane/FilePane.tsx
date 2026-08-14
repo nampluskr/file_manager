@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactElement } from 'react'
 import type { PaneState, SortKey } from '../../../../shared/types'
+import type { DialogState } from '../../../../shared/types'
+import type { ConflictAction, OpResult, TransferRequest } from '../../../../shared/ipc'
 import { useFilePane } from '../../hooks/useFilePane'
 import { FileList } from '../FileList/FileList'
 import { PathBar } from '../PathBar/PathBar'
+import { StatusBar } from '../StatusBar/StatusBar'
 import { CommandLauncher } from '../CommandLauncher/CommandLauncher'
 import { joinPath } from '../../state/pathHelpers'
 
@@ -16,6 +19,29 @@ const SORT_KEY_BY_FUNCTION_KEY: Record<string, 'name' | 'ext' | 'mtime' | 'size'
   F6: 'size'
 }
 
+function makeOpId(): string {
+  return `op-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+// SPEC.md §5.3: selection wins over focus; "[..]" is never a valid target.
+function getOperationTargets(state: PaneState): string[] | null {
+  if (state.selectedNames.size > 0) {
+    const names = state.entries.filter((entry) => !entry.isParent && state.selectedNames.has(entry.name.toLowerCase())).map((entry) => entry.name)
+    return names.length > 0 ? names : null
+  }
+  const focused = state.entries[state.focusedIndex]
+  if (!focused || focused.isParent) return null
+  return [focused.name]
+}
+
+function summarizeResult(result: OpResult): string {
+  const lines = [
+    result.cancelled ? `취소됨: ${result.succeeded.length}개 처리 후 중단` : `완료: 성공 ${result.succeeded.length}개`
+  ]
+  for (const failure of result.failed) lines.push(`${failure.name}: ${failure.message}`)
+  return lines.join('\n')
+}
+
 type FilePaneProps = {
   initialPath: string
   initialSortKey: SortKey
@@ -23,23 +49,50 @@ type FilePaneProps = {
   initialState?: PaneState
   isActive: boolean
   overlayOpen: boolean
+  otherPanePath: string
+  refreshToken: number
   onView: (path: string) => void
   onEdit: (path: string) => void
   onStateChange: (state: PaneState) => void
   onActivate: () => void
   onSwitchPane: () => void
   onSwapPanes: () => void
+  onOperationComplete: () => void
   favorites: { key: number; label: string; path: string }[]
 }
 
-export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialState, isActive, overlayOpen, onView, onEdit, onStateChange, onActivate, onSwitchPane, onSwapPanes, favorites }: FilePaneProps): ReactElement {
-  const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, goToPath, setSort, setScrollTop, typeAhead, refresh } =
+export function FilePane({
+  initialPath,
+  initialSortKey,
+  initialSortAsc,
+  initialState,
+  isActive,
+  overlayOpen,
+  otherPanePath,
+  refreshToken,
+  onView,
+  onEdit,
+  onStateChange,
+  onActivate,
+  onSwitchPane,
+  onSwapPanes,
+  onOperationComplete,
+  favorites
+}: FilePaneProps): ReactElement {
+  const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, goToPath, setSort, setScrollTop, typeAhead, refresh, toggleSelect, selectAll, clearSelection } =
     useFilePane(initialPath, initialSortKey, initialSortAsc, initialState)
   const [pageSize, setPageSize] = useState(10)
   const [launcherFocused, setLauncherFocused] = useState(false)
   const [favoritesOpen, setFavoritesOpen] = useState(false)
   const [favoriteIndex, setFavoriteIndex] = useState(0)
+  const [dialog, setDialog] = useState<DialogState | null>(null)
+  const [inputValue, setInputValue] = useState('')
+  const [dialogError, setDialogError] = useState<string | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const opIdRef = useRef<string | null>(null)
+  const isFirstRefreshToken = useRef(true)
 
   // Without this, Arrow/Enter/Backspace do nothing until the user clicks
   // the pane or tabs into it (SPEC.md §4.3 expects them to work immediately).
@@ -55,8 +108,118 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
     return () => window.removeEventListener('focus', refreshOnFocus)
   }, [refresh])
 
+  // A completed operation on either pane invalidates both panes' listings
+  // (SPEC.md §6.1 step 7); refreshToken is bumped by the parent for that.
+  useEffect(() => {
+    if (isFirstRefreshToken.current) {
+      isFirstRefreshToken.current = false
+      return
+    }
+    refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken])
+
+  useEffect(() => {
+    const offProgress = window.fileManager.onProgress((payload) => {
+      if (payload.opId !== opIdRef.current) return
+      setDialog((current) => (current && current.kind === 'progress' ? { ...current, done: payload.done, currentFile: payload.currentFile } : current))
+    })
+    const offConflict = window.fileManager.onConflict((payload) => {
+      if (payload.opId !== opIdRef.current) return
+      setDialog({ kind: 'conflict', opId: payload.opId, name: payload.name, entryKind: payload.kind })
+    })
+    return () => {
+      offProgress()
+      offConflict()
+    }
+  }, [])
+
+  function finishOperation(result: OpResult): void {
+    opIdRef.current = null
+    setDialog(result.failed.length > 0 || result.cancelled ? { kind: 'message', text: summarizeResult(result) } : null)
+    refresh()
+    onOperationComplete()
+  }
+
+  async function runTransfer(mode: 'copy' | 'move', names: string[], destDir: string): Promise<void> {
+    const opId = makeOpId()
+    opIdRef.current = opId
+    setDialog({ kind: 'progress', opId, label: mode === 'copy' ? '복사 중' : '이동 중', total: names.length, done: 0, currentFile: '' })
+    const request: TransferRequest = { opId, sourceDir: stateRef.current.currentPath, names, destDir }
+    const result = mode === 'copy' ? await window.fileManager.copy(request) : await window.fileManager.move(request)
+    finishOperation(result)
+  }
+
+  async function runDelete(names: string[], permanent: boolean): Promise<void> {
+    const opId = makeOpId()
+    opIdRef.current = opId
+    setDialog({ kind: 'progress', opId, label: permanent ? '영구 삭제 중' : '휴지통으로 이동 중', total: names.length, done: 0, currentFile: '' })
+    const result = await window.fileManager.deleteItems({ opId, dir: stateRef.current.currentPath, names, permanent })
+    finishOperation(result)
+  }
+
+  function cancelActiveOp(): void {
+    if (opIdRef.current) void window.fileManager.cancelOp(opIdRef.current)
+  }
+
+  function replyConflict(action: ConflictAction, applyToAll: boolean): void {
+    if (dialog?.kind !== 'conflict' || !opIdRef.current) return
+    window.fileManager.replyConflict(opIdRef.current, { action, applyToAll })
+    setDialog({ kind: 'progress', opId: opIdRef.current, label: '진행 중', total: 0, done: 0, currentFile: '' })
+  }
+
+  function openDialog(next: DialogState, defaultInput = ''): void {
+    setDialogError(null)
+    setInputValue(defaultInput)
+    setDialog(next)
+  }
+
+  async function submitRename(): Promise<void> {
+    if (dialog?.kind !== 'rename') return
+    const result = await window.fileManager.rename(dialog.dir, dialog.name, inputValue)
+    if (!result.ok) {
+      setDialogError(result.failed[0]?.message ?? '이름을 바꿀 수 없습니다')
+      return
+    }
+    setDialog(null)
+    refresh()
+  }
+
+  async function submitNewFolder(): Promise<void> {
+    if (dialog?.kind !== 'newFolder') return
+    const result = await window.fileManager.createDirectory(dialog.dir, inputValue)
+    if (!result.ok) {
+      setDialogError(result.failed[0]?.message ?? '폴더를 만들 수 없습니다')
+      return
+    }
+    setDialog(null)
+    refresh()
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (overlayOpen) return
+
+    if (dialog) {
+      if (dialog.kind === 'progress') {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          cancelActiveOp()
+        }
+        return
+      }
+      if (dialog.kind === 'conflict') return // handled by dialog buttons only
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setDialog(null)
+        return
+      }
+      if (event.key === 'Enter' && (dialog.kind === 'rename' || dialog.kind === 'newFolder')) {
+        event.preventDefault()
+        void (dialog.kind === 'rename' ? submitRename() : submitNewFolder())
+      }
+      return
+    }
+
     if (favoritesOpen) {
       event.preventDefault()
       if (event.key === 'Escape') {
@@ -74,6 +237,15 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
       }
       return
     }
+
+    if (event.shiftKey && event.key === 'Delete') {
+      event.preventDefault()
+      if (opIdRef.current) return
+      const targets = getOperationTargets(state)
+      if (targets) openDialog({ kind: 'confirmDelete', dir: state.currentPath, names: targets, permanent: true })
+      return
+    }
+
     if (event.ctrlKey) {
       if (event.key.toLowerCase() === 'u') {
         event.preventDefault()
@@ -98,6 +270,11 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
       if (event.key.toLowerCase() === 'r') {
         event.preventDefault()
         refresh()
+        return
+      }
+      if (event.key.toLowerCase() === 'a') {
+        event.preventDefault()
+        selectAll()
         return
       }
       if (event.key.toLowerCase() === 'd') {
@@ -128,6 +305,14 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
         event.preventDefault()
         onSwitchPane()
         return
+      case 'F2': {
+        event.preventDefault()
+        if (opIdRef.current) return
+        const focused = state.entries[state.focusedIndex]
+        if (!focused || focused.isParent) return
+        openDialog({ kind: 'rename', dir: state.currentPath, name: focused.name }, focused.name)
+        return
+      }
       case 'F3': {
         const focused = state.entries[state.focusedIndex]
         if (!focused || focused.isDirectory || focused.isParent) return
@@ -142,6 +327,42 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
         onEdit(joinPath(state.currentPath, focused.name))
         return
       }
+      case 'F5': {
+        event.preventDefault()
+        if (opIdRef.current) return
+        const targets = getOperationTargets(state)
+        if (targets) openDialog({ kind: 'confirmTransfer', mode: 'copy', sourceDir: state.currentPath, destDir: otherPanePath, names: targets })
+        return
+      }
+      case 'F6': {
+        event.preventDefault()
+        if (opIdRef.current) return
+        const targets = getOperationTargets(state)
+        if (targets) openDialog({ kind: 'confirmTransfer', mode: 'move', sourceDir: state.currentPath, destDir: otherPanePath, names: targets })
+        return
+      }
+      case 'F7': {
+        event.preventDefault()
+        if (opIdRef.current) return
+        openDialog({ kind: 'newFolder', dir: state.currentPath })
+        return
+      }
+      case 'F8':
+      case 'Delete': {
+        event.preventDefault()
+        if (opIdRef.current) return
+        const targets = getOperationTargets(state)
+        if (targets) openDialog({ kind: 'confirmDelete', dir: state.currentPath, names: targets, permanent: false })
+        return
+      }
+      case ' ':
+        event.preventDefault()
+        toggleSelect()
+        return
+      case 'Escape':
+        event.preventDefault()
+        clearSelection()
+        return
       case 'ArrowDown':
         event.preventDefault()
         moveFocus(1)
@@ -181,7 +402,6 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
     }
   }
 
-
   return (
     <div
       ref={paneRef}
@@ -206,10 +426,12 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
       <FileList
         entries={state.entries}
         focusedIndex={state.focusedIndex}
+        selectedNames={state.selectedNames}
         scrollTop={state.scrollTop}
         onScrollTopChange={setScrollTop}
         onVisibleRowCountChange={setPageSize}
       />
+      <StatusBar entries={state.entries} selectedNames={state.selectedNames} />
       <CommandLauncher cwd={state.currentPath} focused={launcherFocused} onBlur={() => setLauncherFocused(false)} />
       {favoritesOpen ? (
         <div className="favorites-overlay">
@@ -224,6 +446,93 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialS
           </div>
         </div>
       ) : null}
+      {dialog ? (
+        <div className="op-dialog-overlay">
+          <div className="op-dialog" role="dialog" aria-modal="true">
+            {dialog.kind === 'rename' || dialog.kind === 'newFolder' ? (
+              <>
+                <div className="op-dialog-title">{dialog.kind === 'rename' ? '이름 변경' : '새 폴더'}</div>
+                <input
+                  autoFocus
+                  value={inputValue}
+                  onChange={(event) => setInputValue(event.target.value)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                />
+                {dialogError ? <div className="op-dialog-error">{dialogError}</div> : null}
+                <div className="op-dialog-buttons">
+                  <button type="button" onClick={() => void (dialog.kind === 'rename' ? submitRename() : submitNewFolder())}>확인</button>
+                  <button type="button" onClick={() => setDialog(null)}>취소</button>
+                </div>
+              </>
+            ) : null}
+            {dialog.kind === 'confirmDelete' ? (
+              <>
+                <div className="op-dialog-title">{dialog.permanent ? '영구 삭제' : '휴지통으로 삭제'}</div>
+                <div className="op-dialog-body">{dialog.names.join(', ')}</div>
+                <div className="op-dialog-buttons">
+                  <button type="button" onClick={() => void runDelete(dialog.names, dialog.permanent)}>삭제</button>
+                  <button type="button" onClick={() => setDialog(null)}>취소</button>
+                </div>
+              </>
+            ) : null}
+            {dialog.kind === 'confirmTransfer' ? (
+              <>
+                <div className="op-dialog-title">{dialog.mode === 'copy' ? '복사' : '이동'}</div>
+                <div className="op-dialog-body">
+                  {dialog.names.join(', ')}
+                  <br />→ {dialog.destDir}
+                </div>
+                <div className="op-dialog-buttons">
+                  <button type="button" onClick={() => void runTransfer(dialog.mode, dialog.names, dialog.destDir)}>확인</button>
+                  <button type="button" onClick={() => setDialog(null)}>취소</button>
+                </div>
+              </>
+            ) : null}
+            {dialog.kind === 'conflict' ? (
+              <>
+                <div className="op-dialog-title">이름 충돌</div>
+                <div className="op-dialog-body">{dialog.name}</div>
+                <ConflictButtons onDecide={replyConflict} />
+              </>
+            ) : null}
+            {dialog.kind === 'progress' ? (
+              <>
+                <div className="op-dialog-title">{dialog.label}</div>
+                <div className="op-dialog-body">{dialog.currentFile || '...'}</div>
+                <div className="op-dialog-buttons">
+                  <button type="button" onClick={cancelActiveOp}>취소</button>
+                </div>
+              </>
+            ) : null}
+            {dialog.kind === 'message' ? (
+              <>
+                <div className="op-dialog-body op-dialog-message">{dialog.text}</div>
+                <div className="op-dialog-buttons">
+                  <button type="button" onClick={() => setDialog(null)}>확인</button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+function ConflictButtons({ onDecide }: { onDecide: (action: ConflictAction, applyToAll: boolean) => void }): ReactElement {
+  const [applyToAll, setApplyToAll] = useState(false)
+  return (
+    <>
+      <label className="op-dialog-checkbox">
+        <input type="checkbox" checked={applyToAll} onChange={(event) => setApplyToAll(event.target.checked)} />
+        모두 적용
+      </label>
+      <div className="op-dialog-buttons">
+        <button type="button" onClick={() => onDecide('overwrite', applyToAll)}>덮어쓰기</button>
+        <button type="button" onClick={() => onDecide('skip', applyToAll)}>건너뛰기</button>
+        <button type="button" onClick={() => onDecide('rename', applyToAll)}>자동 이름 변경</button>
+        <button type="button" onClick={() => onDecide('cancel', false)}>취소</button>
+      </div>
+    </>
   )
 }

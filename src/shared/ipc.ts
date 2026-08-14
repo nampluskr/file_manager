@@ -65,6 +65,7 @@ export type IpcContract = {
   'fs:rename': (path: string, from: string, to: string) => OpResult
   'fs:delete': (req: DeleteRequest) => OpResult
   'fs:cancel': (opId: string) => void
+  'fs:conflictReply': (opId: string, response: ConflictResponse) => void
 
   'file:readText': (path: string) => ReadTextResult
   'file:writeText': (req: WriteTextRequest) => WriteTextResult

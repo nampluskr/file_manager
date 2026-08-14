@@ -74,9 +74,14 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
     const focused = state.entries[state.focusedIndex]
     navigate(
       state.currentPath,
-      focused ? { mode: 'byName', name: focused.name, previousIndex: state.focusedIndex } : { mode: 'first' }
+      focused ? { mode: 'byName', name: focused.name, previousIndex: state.focusedIndex } : { mode: 'first' },
+      true
     )
   }, [navigate, state.currentPath, state.entries, state.focusedIndex])
+
+  const toggleSelect = useCallback(() => dispatch({ type: 'toggleSelect' }), [])
+  const selectAll = useCallback(() => dispatch({ type: 'selectAll' }), [])
+  const clearSelection = useCallback(() => dispatch({ type: 'clearSelection' }), [])
 
   const typeAhead = useCallback(
     (char: string) => {
@@ -102,5 +107,19 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
 
   const goToPath = useCallback((path: string) => navigate(path, { mode: 'first' }), [navigate])
 
-  return { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, goToPath, setSort, setScrollTop, typeAhead, refresh }
+  return {
+    state,
+    moveFocus,
+    moveFocusToEdge,
+    activateFocused,
+    goToParent,
+    goToPath,
+    setSort,
+    setScrollTop,
+    typeAhead,
+    refresh,
+    toggleSelect,
+    selectAll,
+    clearSelection
+  }
 }

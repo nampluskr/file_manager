@@ -11,6 +11,7 @@ const OVERSCAN = 4
 type FileListProps = {
   entries: FileEntry[]
   focusedIndex: number
+  selectedNames: Set<string>
   scrollTop: number
   onScrollTopChange: (value: number) => void
   onVisibleRowCountChange: (count: number) => void
@@ -19,6 +20,7 @@ type FileListProps = {
 export function FileList({
   entries,
   focusedIndex,
+  selectedNames,
   scrollTop,
   onScrollTopChange,
   onVisibleRowCountChange
@@ -87,6 +89,7 @@ export function FileList({
               dateLabel={formatDate(entry.mtime)}
               isDirectory={entry.isDirectory}
               isFocused={index === focusedIndex}
+              isSelected={!entry.isParent && selectedNames.has(entry.name.toLowerCase())}
             />
           )
         })}

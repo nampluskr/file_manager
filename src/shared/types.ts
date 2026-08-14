@@ -29,7 +29,9 @@ export type PaneState = {
 // through this single overlay slot so only one can be shown at a time.
 export type DialogState =
   | { kind: 'confirmDelete'; dir: string; names: string[]; permanent: boolean }
+  | { kind: 'confirmTransfer'; mode: 'copy' | 'move'; sourceDir: string; destDir: string; names: string[] }
   | { kind: 'conflict'; opId: string; name: string; entryKind: 'file' | 'dir' }
+  | { kind: 'progress'; opId: string; label: string; total: number; done: number; currentFile: string }
   | { kind: 'favorites' }
   | { kind: 'rename'; dir: string; name: string }
   | { kind: 'newFolder'; dir: string }

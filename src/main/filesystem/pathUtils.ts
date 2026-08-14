@@ -23,3 +23,12 @@ export function toLongPathSafe(absolutePath: string): string {
   }
   return LONG_PATH_PREFIX + absolutePath
 }
+
+// True when `child` is `parent` itself or nested inside it, compared
+// case-insensitively (SPEC.md §12.2). Used to reject copy/move operations
+// that would recurse into their own source (SPEC.md §6 adversarialFocus).
+export function isSubPath(parent: string, child: string): boolean {
+  const parentKey = toComparableKey(parent).replace(/[\\/]+$/, '')
+  const childKey = toComparableKey(child).replace(/[\\/]+$/, '')
+  return childKey === parentKey || childKey.startsWith(`${parentKey}\\`)
+}

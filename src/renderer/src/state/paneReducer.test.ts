@@ -90,6 +90,85 @@ describe('paneReducer', () => {
     expect(refreshed.entries[refreshed.focusedIndex]).toMatchObject({ name: 'b' })
   })
 
+  it('drops selection keys for entries that disappeared during a refresh', () => {
+    let state = createInitialPaneState('C:\\')
+    state = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\',
+      rawEntries: [makeDir('a'), makeDir('b')],
+      focus: { mode: 'first' }
+    })
+    state = { ...state, selectedNames: new Set(['a', 'b']) }
+
+    const refreshed = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\',
+      rawEntries: [makeDir('a')], // "b" was deleted externally
+      focus: { mode: 'first' },
+      preserveView: true
+    })
+    expect(refreshed.selectedNames).toEqual(new Set(['a']))
+  })
+
+  it('toggleSelect toggles the focused entry and advances focus, but not past the last item', () => {
+    let state = createInitialPaneState('C:\\')
+    state = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\',
+      rawEntries: [makeDir('a'), makeDir('b')],
+      focus: { mode: 'first' }
+    })
+    const afterFirst = paneReducer(state, { type: 'toggleSelect' })
+    expect(afterFirst.selectedNames).toEqual(new Set(['a']))
+    expect(afterFirst.focusedIndex).toBe(1)
+
+    const afterSecond = paneReducer(afterFirst, { type: 'toggleSelect' })
+    expect(afterSecond.selectedNames).toEqual(new Set(['a', 'b']))
+    expect(afterSecond.focusedIndex).toBe(1) // clamped, does not wrap
+
+    const toggledOff = paneReducer(afterSecond, { type: 'toggleSelect' })
+    expect(toggledOff.selectedNames).toEqual(new Set(['a']))
+  })
+
+  it('toggleSelect on "[..]" only moves focus, never selects it', () => {
+    let state = createInitialPaneState('C:\\Users\\nampl')
+    state = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\Users\\nampl',
+      rawEntries: [makeDir('docs')],
+      focus: { mode: 'parentOf', name: 'docs' } // focuses "[..]" is not what this does; force index 0 instead
+    })
+    state = { ...state, focusedIndex: 0 } // "[..]"
+    const next = paneReducer(state, { type: 'toggleSelect' })
+    expect(next.selectedNames.size).toBe(0)
+    expect(next.focusedIndex).toBe(1)
+  })
+
+  it('selectAll selects every non-"[..]" entry', () => {
+    let state = createInitialPaneState('C:\\Users\\nampl')
+    state = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\Users\\nampl',
+      rawEntries: [makeDir('docs'), makeFile('a.txt')],
+      focus: { mode: 'first' }
+    })
+    const next = paneReducer(state, { type: 'selectAll' })
+    expect(next.selectedNames).toEqual(new Set(['docs', 'a.txt']))
+  })
+
+  it('clearSelection empties the selection', () => {
+    let state = createInitialPaneState('C:\\')
+    state = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\',
+      rawEntries: [makeDir('a')],
+      focus: { mode: 'first' }
+    })
+    state = { ...state, selectedNames: new Set(['a']) }
+    const next = paneReducer(state, { type: 'clearSelection' })
+    expect(next.selectedNames.size).toBe(0)
+  })
+
   it('moveFocus clamps at the list boundaries without wrapping', () => {
     let state = createInitialPaneState('C:\\')
     state = paneReducer(state, {

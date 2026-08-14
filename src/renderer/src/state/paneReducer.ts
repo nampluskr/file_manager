@@ -13,6 +13,9 @@ export type PaneAction =
   | { type: 'moveFocusToEdge'; edge: 'home' | 'end' }
   | { type: 'setSort'; key: SortKey }
   | { type: 'setScrollTop'; value: number }
+  | { type: 'toggleSelect' }
+  | { type: 'selectAll' }
+  | { type: 'clearSelection' }
 
 // "[..]" is a synthetic entry, not something listDirectory returns -- see
 // SPEC.md §4.2 (always pinned first) and §7.1 (isParent flag).
@@ -56,13 +59,19 @@ export function paneReducer(state: PaneState, action: PaneAction): PaneState {
 
     case 'loadSuccess': {
       const entries = buildDisplayEntries(action.rawEntries, action.path, state.sortKey, state.sortAsc)
+      // SPEC.md §9.2: a refresh keeps selection but drops keys for entries
+      // that no longer exist; a path change clears selection entirely.
+      const survivingKeys = new Set(entries.filter((entry) => !entry.isParent).map((entry) => entry.name.toLowerCase()))
+      const selectedNames = action.preserveView
+        ? new Set([...state.selectedNames].filter((key) => survivingKeys.has(key)))
+        : new Set<string>()
       return {
         ...state,
         currentPath: action.path,
         entries,
         isLoading: false,
         error: null,
-        selectedNames: action.preserveView ? state.selectedNames : new Set(),
+        selectedNames,
         scrollTop: action.preserveView ? state.scrollTop : 0,
         focusedIndex: resolveFocusIndex(entries, action.focus)
       }
@@ -103,5 +112,26 @@ export function paneReducer(state: PaneState, action: PaneAction): PaneState {
 
     case 'setScrollTop':
       return { ...state, scrollTop: action.value }
+
+    case 'toggleSelect': {
+      if (state.entries.length === 0) return state
+      const focused = state.entries[state.focusedIndex]
+      const nextIndex = clamp(state.focusedIndex + 1, 0, state.entries.length - 1)
+      if (!focused || focused.isParent) return { ...state, focusedIndex: nextIndex }
+      const key = focused.name.toLowerCase()
+      const selectedNames = new Set(state.selectedNames)
+      if (selectedNames.has(key)) selectedNames.delete(key)
+      else selectedNames.add(key)
+      return { ...state, selectedNames, focusedIndex: nextIndex }
+    }
+
+    case 'selectAll':
+      return {
+        ...state,
+        selectedNames: new Set(state.entries.filter((entry) => !entry.isParent).map((entry) => entry.name.toLowerCase()))
+      }
+
+    case 'clearSelection':
+      return { ...state, selectedNames: new Set() }
   }
 }

@@ -1,5 +1,14 @@
 import type { FileEntry, Settings } from './types'
-import type { OpResult, PresetId, WriteTextRequest, WriteTextResult } from './ipc'
+import type {
+  ConflictResponse,
+  DeleteRequest,
+  IpcEvents,
+  OpResult,
+  PresetId,
+  TransferRequest,
+  WriteTextRequest,
+  WriteTextResult
+} from './ipc'
 import type { ReadTextResult } from './ipc'
 
 export {}
@@ -16,6 +25,15 @@ declare global {
       writeText: (request: WriteTextRequest) => Promise<WriteTextResult>
       loadSettings: () => Promise<Settings>
       saveSettings: (settings: Settings) => Promise<void>
+      createDirectory: (path: string, name: string) => Promise<OpResult>
+      rename: (path: string, from: string, to: string) => Promise<OpResult>
+      copy: (request: TransferRequest) => Promise<OpResult>
+      move: (request: TransferRequest) => Promise<OpResult>
+      deleteItems: (request: DeleteRequest) => Promise<OpResult>
+      cancelOp: (opId: string) => Promise<void>
+      replyConflict: (opId: string, response: ConflictResponse) => void
+      onProgress: (listener: (payload: IpcEvents['op:progress']) => void) => () => void
+      onConflict: (listener: (payload: IpcEvents['op:conflict']) => void) => () => void
     }
   }
 }

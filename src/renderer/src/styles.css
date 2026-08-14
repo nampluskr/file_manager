@@ -157,6 +157,74 @@ body {
   background: var(--focused-item);
 }
 
+.file-row-selected {
+  color: var(--status-bar);
+}
+
+.status-bar {
+  background: var(--panel-background);
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  display: flex;
+  gap: 16px;
+  padding: 3px 8px;
+}
+
+.op-dialog-overlay {
+  align-items: center;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 30;
+}
+
+.op-dialog {
+  background: var(--panel-background);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(560px, 90vw);
+  padding: 12px;
+}
+
+.op-dialog-title {
+  font-weight: 600;
+}
+
+.op-dialog-body {
+  color: var(--text-secondary);
+  max-height: 40vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.op-dialog-message {
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.op-dialog-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.op-dialog-buttons button,
+.op-dialog input {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font: inherit;
+  padding: 3px 8px;
+}
+
+.op-dialog-checkbox {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
 .file-row-cell {
   padding: 0 6px;
   overflow: hidden;

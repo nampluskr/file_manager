@@ -11,6 +11,7 @@ export function App(): ReactElement {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [paneSnapshots, setPaneSnapshots] = useState<Partial<Record<'left' | 'right', PaneState>>>({})
   const [paneInstance, setPaneInstance] = useState({ left: 0, right: 0 })
+  const [refreshToken, setRefreshToken] = useState(0)
   const saveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -53,6 +54,10 @@ export function App(): ReactElement {
     setSettings((current) => current && { ...current, activePane: current.activePane === 'left' ? 'right' : 'left' })
   }, [])
 
+  const handleOperationComplete = useCallback(() => {
+    setRefreshToken((token) => token + 1)
+  }, [])
+
   const swapPanes = useCallback(() => {
     setPaneSnapshots((current) => ({ left: current.right, right: current.left }))
     setPaneInstance((current) => ({ left: current.left + 1, right: current.right + 1 }))
@@ -69,6 +74,7 @@ export function App(): ReactElement {
       <div className="file-pane-layout">
         {(['left', 'right'] as const).map((side) => {
           const pane = settings.panes[side]
+          const otherSide = side === 'left' ? 'right' : 'left'
           return <FilePane
             key={`${side}-${paneInstance[side]}`}
             initialPath={pane.path}
@@ -77,12 +83,15 @@ export function App(): ReactElement {
             initialState={paneSnapshots[side]}
             isActive={settings.activePane === side}
             overlayOpen={viewerPath !== null || editorPath !== null}
+            otherPanePath={paneSnapshots[otherSide]?.currentPath ?? settings.panes[otherSide].path}
+            refreshToken={refreshToken}
             onView={setViewerPath}
             onEdit={setEditorPath}
             onStateChange={side === 'left' ? handleLeftPaneStateChange : handleRightPaneStateChange}
             onActivate={() => activatePane(side)}
             onSwitchPane={switchPane}
             onSwapPanes={swapPanes}
+            onOperationComplete={handleOperationComplete}
             favorites={settings.favorites}
           />
         })}
