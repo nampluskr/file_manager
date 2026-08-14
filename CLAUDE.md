@@ -51,6 +51,15 @@ Claude Code가 이 저장소에서 작업할 때 매 턴 지켜야 하는 규칙
 6. 변경 내용, 검증 결과, 적대적 검증 결과와 보완 조치, 남은 위험을 사용자에게 보고하고 푸시 승인을 요청한다. 검증 결과는 지적사항별 심각도, 근거, 처리 상태를 포함한 Markdown 표로 제시한다.
 7. 사용자의 명시적 승인을 받은 후에만 `origin`에 푸시한다.
 
+**적대적 검증 재실행은 최초 검증을 포함해 최대 3회까지만 자동으로 진행한다** (2026-08-15 갱신).
+EXDEV 폴백·overwrite·junction 방어처럼 상호작용이 많은 로직은 한 라운드의 수정이 인접한
+지점에서 같은 계열의 새 지적을 유발하는 경우가 있다. 3회차 재검증 이후에도 Critical 또는
+새 지적이 남아 있으면 4회차를 자동으로 시작하지 않는다. 대신 지금까지의 전체 라운드 이력
+(`reviews/A{n}.md`, `A{n}-2.md`, `A{n}-3.md`)과 남은 위험을 사용자에게 보고하고, 다음 중
+하나를 사용자가 결정하도록 확인받는다: 추가 라운드 진행, 구조적 한계로 판단되는 항목을
+사유와 함께 보류, 또는 더 큰 리팩터링(예: 스트림 기반 엔진 재설계)의 별도 착수. 사용자
+결정 없이 3회를 넘겨 자동으로 반복하지 않는다.
+
 `phase-02`, `phase-04`, `phase-07`은 적대적 검증 **필수 통과** Phase다. 각각 명령 주입, 데이터 손상, 데이터 손실을 다루며 되돌릴 수 없다. Critical 지적이 남아 있으면 다음 Phase로 넘어가지 않는다.
 
 Codex sol을 사용할 수 없는 환경이면 그 사실과 사유를 사용자에게 알리고, 대체 검증 방안을 제시한 뒤 승인을 요청한다. 필수 Phase에서 적대적 검증을 생략하지 않는다.
@@ -74,21 +83,20 @@ Codex sol을 사용할 수 없는 환경이면 그 사실과 사유를 사용자
 서브 에이전트가 PowerShell에서 실행할 기본 명령은 다음과 같다. `<phase>`, `<changed-files>`, `<adversarial-focus>`, `<spec-refs>`는 현재 작업 내용으로 대체한다.
 
 ```powershell
-codex exec --sandbox read-only --cd "D:\projects\tools\file_manager" "You are an adversarial reviewer for <phase>. Your job is to break this code, not to confirm it works. Review only these product source files: <changed-files>. Attack these specific points: <adversarial-focus>. Validate against these spec clauses: <spec-refs>. Do not inspect Git status, branches, remotes, or commit history, and do not use shell tools. For each finding, report severity (Critical/Major/Minor), exact reproduction conditions, and the violated spec clause. Order findings by severity. Do not modify any file."
+codex.cmd exec --model gpt-5.6-sol --sandbox read-only --cd "D:\projects\tools\file_manager" "You are an adversarial reviewer for <phase>. Your job is to break this code, not to confirm it works. Review only these product source files: <changed-files>. Attack these specific points: <adversarial-focus>. Validate against these spec clauses: <spec-refs>. Do not inspect Git status, branches, remotes, or commit history, and do not use shell tools. For each finding, report severity (Critical/Major/Minor), exact reproduction conditions, and the violated spec clause. Order findings by severity. Do not modify any file."
 ```
 
-추가로 물어볼 때는 `codex exec resume --last "<추가 질문>"`을 사용한다.
+추가로 물어볼 때는 `codex.cmd exec resume --last "<추가 질문>"`을 사용한다.
 
 Codex CLI 검토를 실행하는 외부 명령의 시간 제한은 기본 10분으로 설정한다.
 CLI 플래그는 Phase 0에서 `codex exec --help`로 실제 지원 여부를 확인하고, 다르면 이 문서를 갱신한다.
 
-**`--model sol` 사용 금지 (2026-08-14 확인).** 이 환경의 Codex CLI는 ChatGPT 계정 인증이며
-`sol` 모델이 `invalid_request_error`("The 'sol' model is not supported when using Codex with a
-ChatGPT account.")로 거부된다. `-m`/`--model`을 지정하지 않고 `~/.codex/config.toml`의 기본
-모델을 그대로 사용한다. "Codex sol"은 벤더가 다른 교차 검증자라는 역할 이름일 뿐, 특정 모델
-문자열을 가리키지 않는다. 이 결정은 `workflow-hub` 프로젝트(`docs/releases/v0.1/PLAN.md`,
-`SPEC.md`)에서 이미 같은 이유로 `--model` 플래그 없이 `codex exec --sandbox read-only`만 쓰고
-있는 것을 참고해 반영했다.
+**모델 지정 규칙 (2026-08-15 갱신).** Codex CLI 실행에는 전체 모델 ID인
+`--model gpt-5.6-sol`을 사용한다. 짧은 별칭 `--model sol`은 사용하지 않는다. PowerShell에서는
+실행 정책 때문에 `codex.ps1` 대신 `codex.cmd`를 사용한다. 계정 또는 조직 정책이
+`gpt-5.6-sol` 접근을 거부하면 기본 모델로 조용히 폴백하지 말고, 오류와 대체 검증안을
+메인 에이전트 및 사용자에게 보고한다. "Codex sol"은 교차 검증자 역할 이름이 아니라
+이 지침에서 지정한 `gpt-5.6-sol` 모델을 뜻한다.
 
 ## Commit and Push Rules
 
