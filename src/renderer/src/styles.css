@@ -1,14 +1,118 @@
-:root {
-  color-scheme: dark;
+/* Dark theme tokens (SPEC.md §14.3). Light theme is added in phase-08. */
+:root[data-theme='dark'] {
+  --background: #1e1e1e;
+  --panel-background: #252526;
+  --header-background: #2d2d2d;
+  --text-primary: #d4d4d4;
+  --text-secondary: #9d9d9d;
+  --border: #3c3c3c;
+  --active-pane: #094771;
+  --focused-item: #062f4a;
+  --selected-item: #37373d;
+  --status-bar: #007acc;
+  --command-bar: #252526;
+  --error-text: #f48771;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--background);
+  color: var(--text-primary);
   font-family: 'Segoe UI', sans-serif;
+  font-size: 13px;
 }
 
-.app-shell {
-  padding: 16px;
+.file-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  outline: none;
+}
+
+.path-bar {
+  padding: 4px 8px;
+  background: var(--panel-background);
+  border-bottom: 1px solid var(--border);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  position: relative;
+}
+
+.path-bar-measure {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+}
+
+.file-list-header,
+.file-row {
+  display: grid;
+  grid-template-columns: 1fr 70px 80px 140px;
+}
+
+.file-list-header {
+  background: var(--header-background);
+  border-bottom: 1px solid var(--border);
+  padding: 2px 0;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.file-pane-error {
+  padding: 4px 8px;
+  color: var(--error-text);
+  background: var(--panel-background);
+  border-bottom: 1px solid var(--border);
+}
+
+.file-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+
+.file-list-spacer {
+  position: relative;
+}
+
+.file-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  align-items: center;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.file-row-directory {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.file-row-focused {
+  background: var(--focused-item);
+}
+
+.file-row-cell {
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row-size,
+.file-row-date {
+  text-align: right;
 }

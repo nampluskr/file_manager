@@ -4,8 +4,13 @@ import { is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
 
 function configureContentSecurityPolicy(): void {
+  // Dev only: Vite's React-refresh preamble is an inline <script type="module">,
+  // so script-src needs 'unsafe-inline' here or it silently fails to set up
+  // window.$RefreshReg$/$RefreshSig$ ("can't detect preamble") and the whole
+  // renderer stays blank. The production build has no inline scripts, so the
+  // shipped policy stays strict.
   const policy = is.dev
-    ? "default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*"
+    ? "default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*"
     : "default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {

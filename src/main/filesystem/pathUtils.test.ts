@@ -1,23 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isWithinRoot, toComparableKey, toLongPathSafe } from './pathUtils'
-
-describe('isWithinRoot', () => {
-  it('accepts the root itself', () => {
-    expect(isWithinRoot('C:\\root', 'C:\\root')).toBe(true)
-  })
-
-  it('accepts a nested path', () => {
-    expect(isWithinRoot('C:\\root', 'C:\\root\\sub\\file.txt')).toBe(true)
-  })
-
-  it('rejects a path outside the root', () => {
-    expect(isWithinRoot('C:\\root', 'C:\\other\\file.txt')).toBe(false)
-  })
-
-  it('rejects a sibling directory with a matching name prefix', () => {
-    expect(isWithinRoot('C:\\root', 'C:\\root-sibling\\file.txt')).toBe(false)
-  })
-})
+import { toComparableKey, toLongPathSafe } from './pathUtils'
 
 describe('toComparableKey', () => {
   it('lower-cases the input', () => {

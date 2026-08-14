@@ -1,9 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { PING_CHANNEL, type PingResult } from '../shared/ipc'
+import type { FileEntry } from '../shared/types'
 
-// Phase 0 scaffolding: proves the typed IPC round trip end to end. The real
-// API surface (fs:/file:/sys:/config: channels) is exposed once each phase
-// implements its handlers.
 contextBridge.exposeInMainWorld('fileManager', {
-  ping: (): Promise<PingResult> => ipcRenderer.invoke(PING_CHANNEL)
+  // Read synchronously in the preload's own Node context; no IPC round
+  // trip needed just to seed the initial pane path.
+  homePath: process.env.USERPROFILE ?? 'C:\\',
+
+  listDirectory: (path: string): Promise<{ path: string; entries: FileEntry[] }> =>
+    ipcRenderer.invoke('fs:listDirectory', path),
+
+  openPath: (path: string): Promise<void> => ipcRenderer.invoke('sys:openPath', path)
 })
