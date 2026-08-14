@@ -1,6 +1,6 @@
 // Pure copy engine (SPEC.md §6.2). No electron import (SPEC.md §11.4).
 
-import { copyFile, lstat, mkdir, readdir, rm } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { isSubPath, isSubPathReal, toComparableKey, toLongPathSafe } from './pathUtils'
 import { toUserMessage } from './errorMessages'
@@ -72,6 +72,17 @@ async function resolveConflict(name: string, kind: ConflictKind, destDir: string
   }
 }
 
+// Restores a file/dir that was renamed aside before an overwrite attempt.
+// Only ever called on a path where nothing has been deleted yet (see the
+// overwrite handling below), so this can always put things back.
+async function restoreBackup(backupPath: string, originalPath: string, relativeLabel: string, ctx: CopyContext): Promise<void> {
+  try {
+    await rename(toLongPathSafe(backupPath), toLongPathSafe(originalPath))
+  } catch (error) {
+    ctx.failed.push({ name: relativeLabel, code: 'ERESTORE', message: `대상 복구 실패: ${toUserMessage(error)}` })
+  }
+}
+
 async function copyEntry(srcDir: string, destDir: string, name: string, relativeLabel: string, ctx: CopyContext): Promise<boolean> {
   if (ctx.signal.aborted) throw new CancelledError()
 
@@ -100,26 +111,30 @@ async function copyEntry(srcDir: string, destDir: string, name: string, relative
     ctx.failed.push({ name: relativeLabel, code: 'ESAME', message: '원본과 대상이 같습니다' })
     return false
   }
+  // A junction/reparse point can alias `destDir` itself to somewhere inside
+  // srcPath even when the target `name` doesn't exist yet -- the earlier
+  // fix only re-checked once the destination name already existed as a
+  // directory, which a fresh name under an aliased destDir slips past (see
+  // A7-2 #3). destDir is always a real, already-existing directory at this
+  // point (it's what we're about to write into), so this check is always
+  // meaningful.
+  if (await isSubPathReal(srcPath, destDir)) {
+    ctx.failed.push({ name: relativeLabel, code: 'ERECURSIVE', message: '대상이 원본의 하위 폴더입니다' })
+    return false
+  }
 
   if (stats.isDirectory()) {
     const existing = await pathExists(rawDestPath)
-    let targetName = name
     if (existing === 'file') {
-      const resolved = await resolveConflict(name, 'file', destDir, ctx)
-      if (resolved === 'skip') return true
-      if (resolved === 'cancel') throw new ConflictCancelledError()
-      if (resolved === 'error') return false
-      targetName = resolved
-    }
-    // existing === 'dir': merge silently, no prompt (SPEC.md §6.2). A
-    // junction/reparse point can alias this "existing" directory to
-    // somewhere inside srcPath even though the string paths look unrelated
-    // (see A7 #5), so the recursion guard is re-checked with realpath here.
-    const finalDestPath = join(destDir, targetName)
-    if (existing === 'dir' && (await isSubPathReal(srcPath, finalDestPath))) {
-      ctx.failed.push({ name: relativeLabel, code: 'ERECURSIVE', message: '대상이 원본의 하위 폴더입니다' })
+      // A folder can never overwrite a file in place; refuse instead of
+      // calling mkdir() on an existing file path (SPEC.md §6.6 doesn't
+      // define cross-type overwrite semantics, so this is treated as an
+      // unresolvable conflict rather than attempted).
+      ctx.failed.push({ name: relativeLabel, code: 'ETYPE', message: '파일과 폴더는 바꿀 수 없습니다' })
       return false
     }
+    // existing === 'dir' or null: merge silently, no prompt (SPEC.md §6.2).
+    const finalDestPath = join(destDir, name)
     try {
       await mkdir(toLongPathSafe(finalDestPath), { recursive: true })
     } catch (error) {
@@ -136,26 +151,51 @@ async function copyEntry(srcDir: string, destDir: string, name: string, relative
   }
 
   const existing = await pathExists(rawDestPath)
+  if (existing === 'dir') {
+    ctx.failed.push({ name: relativeLabel, code: 'ETYPE', message: '파일과 폴더는 바꿀 수 없습니다' })
+    return false
+  }
+
   let targetName = name
-  if (existing) {
-    const resolved = await resolveConflict(name, existing, destDir, ctx)
+  let isOverwrite = false
+  if (existing === 'file') {
+    const resolved = await resolveConflict(name, 'file', destDir, ctx)
     if (resolved === 'skip') return true
     if (resolved === 'cancel') throw new ConflictCancelledError()
     if (resolved === 'error') return false
+    isOverwrite = resolved === name
     targetName = resolved
   }
 
   const finalDestPath = toLongPathSafe(join(destDir, targetName))
+
+  // Overwrite: move the existing file aside first instead of letting
+  // copyFile() clobber it directly, so a failure or cancellation partway
+  // through never leaves both the old and new content gone (see A7-2 #1 --
+  // the copy-path counterpart of moveItems.ts's overwrite handling).
+  let backupPath: string | null = null
+  if (isOverwrite) {
+    backupPath = `${finalDestPath}.__fmgr_bak_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    try {
+      await rename(finalDestPath, backupPath)
+    } catch (error) {
+      ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
+      return false
+    }
+  }
+
   try {
     await copyFile(safeSrcPath, finalDestPath)
+    if (ctx.signal.aborted) throw new CancelledError()
   } catch (error) {
+    await rm(finalDestPath, { force: true }).catch(() => {})
+    if (backupPath) await restoreBackup(backupPath, finalDestPath, relativeLabel, ctx)
+    if (error instanceof CancelledError) throw error
     ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
     return false
   }
-  if (ctx.signal.aborted) {
-    await rm(finalDestPath, { force: true }).catch(() => {})
-    throw new CancelledError()
-  }
+
+  if (backupPath) await rm(toLongPathSafe(backupPath), { force: true }).catch(() => {})
   ctx.doneCount.value += 1
   ctx.onProgress(relativeLabel, ctx.doneCount.value)
   return true

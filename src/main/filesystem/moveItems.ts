@@ -22,6 +22,12 @@ export type MoveOptions = {
 class CancelledError extends Error {}
 class ConflictCancelledError extends Error {}
 
+// "moved": actually transferred. "skipped": user chose to skip, or every
+// child of a merged directory was skipped -- neither is a failure, but
+// only "moved" counts toward the operation's `succeeded` list (see A7-2 #5:
+// a fully-skipped directory must not be reported as a successful move).
+type EntryOutcome = 'moved' | 'skipped' | 'failed'
+
 function errorCode(error: unknown): string {
   return (error as NodeJS.ErrnoException).code ?? 'UNKNOWN'
 }
@@ -78,6 +84,19 @@ async function cleanupPartialCopy(path: string): Promise<boolean> {
   }
 }
 
+// Restores a destination that was renamed aside before an overwrite
+// attempt. Safe to call from any failure/cancellation path: performMove()
+// never deletes the source before its own destination write is verified,
+// so the "new" content -- if not confirmed moved -- is still intact at the
+// source, and putting the backup back never loses data.
+async function restoreBackup(backupPath: string, originalPath: string, relativeLabel: string, ctx: MoveContext): Promise<void> {
+  try {
+    await rename(toLongPathSafe(backupPath), toLongPathSafe(originalPath))
+  } catch (error) {
+    ctx.failed.push({ name: relativeLabel, code: 'ERESTORE', message: `대상 복구 실패: ${toUserMessage(error)}` })
+  }
+}
+
 // Copies one file/directory tree onto a destination that is guaranteed not
 // to exist yet (fresh EXDEV target or a post-rename-aside overwrite slot).
 // Symlinks are excluded and recorded as failures rather than silently
@@ -123,11 +142,9 @@ async function copyTreeForMove(srcPath: string, destPath: string, isDir: boolean
 }
 
 // Verifies every non-symlink file was actually written before the source is
-// allowed to be deleted. Unlike the previous implementation, this always
-// stats the destination -- including for an empty directory -- instead of
-// trivially returning true when there are no children to recurse into (see
-// A7 #4: an empty-directory "verification" that never touches the
-// destination cannot detect a destination that vanished after creation).
+// allowed to be deleted. Always stats the destination -- including for an
+// empty directory -- instead of trivially returning true when there are no
+// children to recurse into (A7 #4).
 async function verifyCopiedTree(srcPath: string, destPath: string, isDir: boolean): Promise<boolean> {
   if (!isDir) {
     const [srcStat, destStat] = await Promise.all([
@@ -151,7 +168,9 @@ async function verifyCopiedTree(srcPath: string, destPath: string, isDir: boolea
 
 // Moves srcPath onto destPath, which must not already exist. Tries a plain
 // rename() first; on EXDEV, falls back to copy -> verify -> delete-original,
-// only ever deleting the source once the copy is confirmed complete.
+// re-checking cancellation and catching every step's errors (not just
+// CancelledError) so a partial copy is always cleaned up rather than left
+// behind or silently propagated as an unhandled rejection (A7-2 #1 Major).
 async function performMove(srcPath: string, destPath: string, srcStats: Stats, relativeLabel: string, ctx: MoveContext): Promise<boolean> {
   try {
     await rename(toLongPathSafe(srcPath), toLongPathSafe(destPath))
@@ -169,10 +188,10 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
   try {
     ok = await copyTreeForMove(srcPath, destPath, srcStats.isDirectory(), relativeLabel, ctx)
   } catch (error) {
-    if (error instanceof CancelledError) {
-      await cleanupPartialCopy(destPath)
-    }
-    throw error
+    await cleanupPartialCopy(destPath)
+    if (error instanceof CancelledError) throw error
+    ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
+    return false
   }
   if (!ok) {
     const cleaned = await cleanupPartialCopy(destPath)
@@ -180,7 +199,19 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
     return false
   }
 
-  const verified = await verifyCopiedTree(srcPath, destPath, srcStats.isDirectory())
+  if (ctx.signal.aborted) {
+    await cleanupPartialCopy(destPath)
+    throw new CancelledError()
+  }
+
+  let verified: boolean
+  try {
+    verified = await verifyCopiedTree(srcPath, destPath, srcStats.isDirectory())
+  } catch (error) {
+    await cleanupPartialCopy(destPath)
+    ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: `복사 검증 중 오류: ${toUserMessage(error)}` })
+    return false
+  }
   if (!verified) {
     const cleaned = await cleanupPartialCopy(destPath)
     ctx.failed.push({
@@ -189,6 +220,16 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
       message: cleaned ? '복사 검증에 실패했습니다' : '복사 검증에 실패했으며 임시 복사본 정리에도 실패했습니다'
     })
     return false
+  }
+
+  if (ctx.signal.aborted) {
+    // Copy is verified-complete but the source hasn't been deleted yet.
+    // Deleting it now would still be safe (dest already has everything),
+    // but honoring the cancellation and leaving the source untouched is
+    // the more conservative choice -- a duplicate is recoverable, a wrongly
+    // deleted source is not.
+    await cleanupPartialCopy(destPath)
+    throw new CancelledError()
   }
 
   try {
@@ -208,7 +249,39 @@ async function performMove(srcPath: string, destPath: string, srcStats: Stats, r
   return true
 }
 
-async function moveEntry(srcDir: string, destDir: string, name: string, relativeLabel: string, ctx: MoveContext): Promise<boolean> {
+// Wraps performMove() with the overwrite-backup dance: the pre-existing
+// destination is renamed aside before the move attempt and only removed
+// once performMove() confirms success. Any failure OR exception (including
+// cancellation) restores the backup before propagating -- performMove()
+// only ever deletes the source after its destination write is verified, so
+// at the point of any non-success outcome the source is still guaranteed
+// intact and restoring the backup is always safe (A7-2 #2).
+async function moveWithOverwrite(srcPath: string, rawDestPath: string, srcStats: Stats, relativeLabel: string, ctx: MoveContext): Promise<boolean> {
+  const backupPath = `${rawDestPath}.__fmgr_bak_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  try {
+    await rename(toLongPathSafe(rawDestPath), toLongPathSafe(backupPath))
+  } catch (error) {
+    ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
+    return false
+  }
+
+  let moved: boolean
+  try {
+    moved = await performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
+  } catch (error) {
+    await restoreBackup(backupPath, rawDestPath, relativeLabel, ctx)
+    throw error
+  }
+
+  if (moved) {
+    await rm(toLongPathSafe(backupPath), { recursive: true, force: true }).catch(() => {})
+    return true
+  }
+  await restoreBackup(backupPath, rawDestPath, relativeLabel, ctx)
+  return false
+}
+
+async function moveEntry(srcDir: string, destDir: string, name: string, relativeLabel: string, ctx: MoveContext): Promise<EntryOutcome> {
   if (ctx.signal.aborted) throw new CancelledError()
 
   const srcPath = join(srcDir, name)
@@ -216,11 +289,20 @@ async function moveEntry(srcDir: string, destDir: string, name: string, relative
 
   if (isSubPath(srcPath, rawDestPath)) {
     ctx.failed.push({ name: relativeLabel, code: 'ERECURSIVE', message: '대상이 원본의 하위 폴더입니다' })
-    return false
+    return 'failed'
   }
   if (toComparableKey(resolve(srcPath)) === toComparableKey(resolve(rawDestPath))) {
     ctx.failed.push({ name: relativeLabel, code: 'ESAME', message: '원본과 대상이 같습니다' })
-    return false
+    return 'failed'
+  }
+  // A junction/reparse point can alias `destDir` itself to somewhere inside
+  // srcPath even when the target `name` doesn't exist yet -- checking only
+  // once the destination name already exists as a directory (the earlier
+  // fix) misses a fresh name under an aliased destDir (A7-2 #3). destDir is
+  // always a real, already-existing directory at this point.
+  if (await isSubPathReal(srcPath, destDir)) {
+    ctx.failed.push({ name: relativeLabel, code: 'ERECURSIVE', message: '대상이 원본의 하위 폴더입니다' })
+    return 'failed'
   }
 
   let srcStats: Stats
@@ -228,87 +310,60 @@ async function moveEntry(srcDir: string, destDir: string, name: string, relative
     srcStats = await lstat(toLongPathSafe(srcPath))
   } catch (error) {
     ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
-    return false
+    return 'failed'
   }
   if (srcStats.isSymbolicLink()) {
     ctx.failed.push({ name: relativeLabel, code: 'ELINK', message: '링크는 지원하지 않습니다' })
-    return false
+    return 'failed'
   }
 
   const existingKind = await pathExists(rawDestPath)
 
   if (existingKind === 'dir' && srcStats.isDirectory()) {
-    // Directory/directory conflict merges silently, mirroring copy (SPEC.md
-    // §6.2/§6.3). A junction can alias this "existing" directory to
-    // somewhere inside srcPath even though the string paths look unrelated
-    // (see A7 #5), so the guard is re-checked with realpath here.
-    if (await isSubPathReal(srcPath, rawDestPath)) {
-      ctx.failed.push({ name: relativeLabel, code: 'ERECURSIVE', message: '대상이 원본의 하위 폴더입니다' })
-      return false
-    }
+    // Directory/directory conflict merges silently, mirroring copy (SPEC.md §6.2/§6.3).
     const children = await readdir(toLongPathSafe(srcPath), { withFileTypes: true })
-    let ok = true
+    let anyFailed = false
+    let anyMoved = false
     for (const child of children) {
-      const childOk = await moveEntry(srcPath, rawDestPath, child.name, `${relativeLabel}\\${child.name}`, ctx)
-      ok = ok && childOk
+      const childOutcome = await moveEntry(srcPath, rawDestPath, child.name, `${relativeLabel}\\${child.name}`, ctx)
+      if (childOutcome === 'failed') anyFailed = true
+      if (childOutcome === 'moved') anyMoved = true
     }
-    if (ok) {
+    if (!anyFailed && anyMoved) {
       try {
         await rmdir(toLongPathSafe(srcPath))
       } catch {
-        // Non-empty (some children were skipped) or otherwise busy: leave it, not an error.
+        // Not actually empty (a sibling item may exist alongside the moved
+        // children) or otherwise busy: leave it, not an error.
       }
     }
-    // A7 #10 (deferred, Major): if every child in this directory was
-    // individually skipped, `ok` is still true here (skip is not a failure)
-    // and the parent directory is reported succeeded even though nothing
-    // moved and rmdir() above silently no-ops on the non-empty directory.
-    // Distinguishing "fully skipped" from "fully moved" would need a
-    // separate per-directory move-count, which is deferred: skip is a
-    // deliberate user choice, not data loss, and every individually skipped
-    // file is still correctly absent from `succeeded`/`failed`.
-    return ok
+    if (anyFailed) return 'failed'
+    // A7-2 #5: a directory where every child was individually skipped (or
+    // that had no children at all) must not be reported as "moved" -- the
+    // source is genuinely unchanged.
+    return anyMoved ? 'moved' : 'skipped'
   }
 
   if (existingKind !== null) {
     if ((existingKind === 'dir') !== srcStats.isDirectory()) {
-      ctx.failed.push({ name: relativeLabel, code: 'ETYPE', message: '파일과 폴더는 덮어쓸 수 없습니다' })
-      return false
+      // A folder can never overwrite a file in place or vice versa; refuse
+      // instead of attempting a doomed mkdir()/copyFile() (A7-2 #6).
+      ctx.failed.push({ name: relativeLabel, code: 'ETYPE', message: '파일과 폴더는 바꿀 수 없습니다' })
+      return 'failed'
     }
     const resolved = await resolveConflict(name, existingKind, destDir, ctx)
-    if (resolved === 'skip') return true
+    if (resolved === 'skip') return 'skipped'
     if (resolved === 'cancel') throw new ConflictCancelledError()
-    if (resolved === 'error') return false
+    if (resolved === 'error') return 'failed'
 
-    if (resolved === name) {
-      // Overwrite: move the existing destination aside first instead of
-      // deleting it outright, so it can be restored if the transfer fails
-      // after this point (see A7 #2 -- an overwrite must never destroy the
-      // existing destination before the replacement is confirmed).
-      const backupPath = `${rawDestPath}.__fmgr_bak_${Date.now()}_${Math.random().toString(36).slice(2)}`
-      try {
-        await rename(toLongPathSafe(rawDestPath), toLongPathSafe(backupPath))
-      } catch (error) {
-        ctx.failed.push({ name: relativeLabel, code: errorCode(error), message: toUserMessage(error) })
-        return false
-      }
-      const moved = await performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
-      if (moved) {
-        await rm(toLongPathSafe(backupPath), { recursive: true, force: true }).catch(() => {})
-        return true
-      }
-      try {
-        await rename(toLongPathSafe(backupPath), toLongPathSafe(rawDestPath))
-      } catch (restoreError) {
-        ctx.failed.push({ name: relativeLabel, code: 'ERESTORE', message: `대상 복구 실패: ${toUserMessage(restoreError)}` })
-      }
-      return false
-    }
-
-    return performMove(srcPath, join(destDir, resolved), srcStats, relativeLabel, ctx)
+    const moved =
+      resolved === name
+        ? await moveWithOverwrite(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
+        : await performMove(srcPath, join(destDir, resolved), srcStats, relativeLabel, ctx)
+    return moved ? 'moved' : 'failed'
   }
 
-  return performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)
+  return (await performMove(srcPath, rawDestPath, srcStats, relativeLabel, ctx)) ? 'moved' : 'failed'
 }
 
 export async function moveItems(options: MoveOptions): Promise<TransferResult> {
@@ -329,8 +384,8 @@ export async function moveItems(options: MoveOptions): Promise<TransferResult> {
       break
     }
     try {
-      const ok = await moveEntry(options.sourceDir, options.destDir, name, name, ctx)
-      if (ok) succeeded.push(name)
+      const outcome = await moveEntry(options.sourceDir, options.destDir, name, name, ctx)
+      if (outcome === 'moved') succeeded.push(name)
     } catch (error) {
       if (error instanceof CancelledError || error instanceof ConflictCancelledError) {
         cancelled = true

@@ -167,21 +167,38 @@ export function FilePane({
   // saw, not the pane's live currentPath -- otherwise switching panes or
   // paths between "dialog open" and "confirm click" would silently redirect
   // the operation to a different directory than what was shown (A7 #12).
+  // A rejected invoke() (main-process validation throwing before it can
+  // return a structured OpResult, a preload/IPC-layer error, etc.) must
+  // still resolve the progress dialog -- otherwise opIdRef and the overlay
+  // are stranded open with no way to close them (A7-2 #7).
+  function toRejectionResult(error: unknown): OpResult {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: false, succeeded: [], failed: [{ name: '', code: 'ERROR', message }], cancelled: false }
+  }
+
   async function runTransfer(mode: 'copy' | 'move', sourceDir: string, names: string[], destDir: string): Promise<void> {
     const opId = makeOpId()
     opIdRef.current = opId
     setDialog({ kind: 'progress', opId, label: mode === 'copy' ? '복사 중' : '이동 중', total: names.length, done: 0, currentFile: '' })
     const request: TransferRequest = { opId, sourceDir, names, destDir }
-    const result = mode === 'copy' ? await window.fileManager.copy(request) : await window.fileManager.move(request)
-    finishOperation(result)
+    try {
+      const result = mode === 'copy' ? await window.fileManager.copy(request) : await window.fileManager.move(request)
+      finishOperation(result)
+    } catch (error) {
+      finishOperation(toRejectionResult(error))
+    }
   }
 
   async function runDelete(dir: string, names: string[], permanent: boolean): Promise<void> {
     const opId = makeOpId()
     opIdRef.current = opId
     setDialog({ kind: 'progress', opId, label: permanent ? '영구 삭제 중' : '휴지통으로 이동 중', total: names.length, done: 0, currentFile: '' })
-    const result = await window.fileManager.deleteItems({ opId, dir, names, permanent })
-    finishOperation(result)
+    try {
+      const result = await window.fileManager.deleteItems({ opId, dir, names, permanent })
+      finishOperation(result)
+    } catch (error) {
+      finishOperation(toRejectionResult(error))
+    }
   }
 
   function cancelActiveOp(): void {

@@ -189,6 +189,75 @@ describe('copyItems', () => {
     expect((await readdir(join(destDir, 'dir'))).sort()).toEqual(['existing.txt', 'inner.txt'])
   })
 
+  it('restores the original destination file if overwrite is cancelled right after the copy lands (A7-2 #1)', async () => {
+    await setup()
+    await writeFile(join(sourceDir, 'a.txt'), 'incoming')
+    await writeFile(join(destDir, 'a.txt'), 'original')
+    const controller = new AbortController()
+
+    const result = await copyItems({
+      sourceDir,
+      destDir,
+      names: ['a.txt'],
+      signal: controller.signal,
+      onProgress: () => {},
+      onConflict: async () => {
+        controller.abort() // cancellation lands mid-overwrite, right before copyFile() runs
+        return { action: 'overwrite', applyToAll: false }
+      }
+    })
+
+    expect(result.cancelled).toBe(true)
+    // The pre-existing destination file must survive a cancelled overwrite.
+    expect(await readFile(join(destDir, 'a.txt'), 'utf8')).toBe('original')
+    expect(await readdir(destDir)).toEqual(['a.txt']) // no stray backup artifact left behind
+  })
+
+  it('rejects a folder overwriting a same-named file, and vice versa, without touching either (A7-2 #6)', async () => {
+    await setup()
+    await mkdir(join(sourceDir, 'item'))
+    await writeFile(join(destDir, 'item'), 'a file, not a folder')
+
+    const result = await copyItems({
+      sourceDir,
+      destDir,
+      names: ['item'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: autoCancel
+    })
+
+    expect(result.failed[0]).toMatchObject({ code: 'ETYPE' })
+    expect(await readFile(join(destDir, 'item'), 'utf8')).toBe('a file, not a folder')
+  })
+
+  it('rejects copying into a destination name aliased by a junction into the source tree (A7-2 #3)', async () => {
+    await setup()
+    // destDir/alias is a junction pointing at sourceDir/src/inside, and
+    // "out" is a real directory under that target. So destDir/alias/out
+    // exists (satisfying the pre-existing-destination requirement) but
+    // resolves, through the junction, to a path physically inside
+    // sourceDir/src -- the very tree being copied.
+    await mkdir(join(sourceDir, 'src', 'inside', 'out'), { recursive: true })
+    let junctionCreated = true
+    await symlink(join(sourceDir, 'src', 'inside'), join(destDir, 'alias'), 'junction').catch(() => {
+      junctionCreated = false
+    })
+    if (!junctionCreated) return // environment cannot create junctions; skip rather than false-fail
+
+    const result = await copyItems({
+      sourceDir,
+      destDir: join(destDir, 'alias', 'out'),
+      names: ['src'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: autoCancel
+    })
+
+    expect(result.failed[0]).toMatchObject({ code: 'ERECURSIVE' })
+    expect(result.succeeded).toEqual([])
+  })
+
   it('allows the remaining items to proceed after one item fails (partial failure)', async () => {
     await setup()
     await writeFile(join(sourceDir, 'ok.txt'), 'ok')

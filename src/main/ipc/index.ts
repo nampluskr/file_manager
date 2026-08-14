@@ -83,10 +83,30 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  function makeConflictResolver(opId: string, event: IpcMainInvokeEvent) {
+  // If `signal` is already aborted -- or becomes aborted while this
+  // particular conflict prompt is outstanding -- the wait resolves as a
+  // cancel instead of hanging forever. Without this, a cancel that lands in
+  // the gap between the engine checking `signal.aborted` and this promise
+  // actually registering itself in `pendingConflicts` is missed entirely:
+  // fs:cancel's lookup finds nothing to resolve, and the operation (and its
+  // activeOpId lock) is stuck for good (see A7-2 #2 Major, the residual
+  // conflict-wait race).
+  function makeConflictResolver(opId: string, event: IpcMainInvokeEvent, signal: AbortSignal) {
     return (name: string, kind: ConflictKind): Promise<ConflictDecision> =>
       new Promise((resolveConflict) => {
-        pendingConflicts.set(opId, resolveConflict)
+        if (signal.aborted) {
+          resolveConflict({ action: 'cancel', applyToAll: false })
+          return
+        }
+        const onAbort = (): void => {
+          pendingConflicts.delete(opId)
+          resolveConflict({ action: 'cancel', applyToAll: false })
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+        pendingConflicts.set(opId, (response) => {
+          signal.removeEventListener('abort', onAbort)
+          resolveConflict(response)
+        })
         event.sender.send('op:conflict', { opId, name, kind })
       })
   }
@@ -99,20 +119,26 @@ export function registerIpcHandlers(): void {
     }
   }
 
-  async function runExclusiveTransfer(opId: string, event: IpcMainInvokeEvent, run: (controller: AbortController) => Promise<OpResult>): Promise<OpResult> {
+  // Acquires the single-flight lock synchronously (no `await` before the
+  // check-then-set), then runs `run`, releasing the lock in `finally`
+  // regardless of how `run` exits (return, throw, or an unhandled
+  // rejection surfacing as a caught error). `run` is responsible for
+  // catching its own errors and returning a structured OpResult -- see the
+  // `fs:copy`/`fs:move`/`fs:delete`/`fs:rename`/`fs:createDirectory`
+  // handlers below, all of which wrap their body in try/catch before this
+  // ever runs `finally` (A7-2 #4: the previous point-in-time-only
+  // `rejectIfBusy()` check never actually took the lock, so two calls could
+  // both pass it).
+  function runExclusive(opId: string, run: () => Promise<OpResult>): OpResult | Promise<OpResult> {
     if (activeOpId !== null) {
       return { ok: false, succeeded: [], failed: [{ name: '', code: 'EBUSY_OP', message: '다른 작업이 진행 중입니다' }], cancelled: false }
     }
     activeOpId = opId
-    const controller = new AbortController()
-    controllers.set(opId, controller)
-    try {
-      return await run(controller)
-    } finally {
+    return run().finally(() => {
       controllers.delete(opId)
       pendingConflicts.delete(opId)
       activeOpId = null
-    }
+    })
   }
   // The executable probe begins once during startup and its result is reused
   // by every launcher request (SPEC.md §8.4.1).
@@ -133,82 +159,101 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // SPEC.md §6.8: rename/createDirectory also touch the tree a copy/move/
-  // delete may be working on, so they respect the same single-flight lock
-  // (see A7 #13).
-  function rejectIfBusy(): OpResult | null {
-    if (activeOpId === null) return null
-    return { ok: false, succeeded: [], failed: [{ name: '', code: 'EBUSY_OP', message: '다른 작업이 진행 중입니다' }], cancelled: false }
+  function toFailureResult(error: unknown): OpResult {
+    return { ok: false, succeeded: [], failed: [{ name: '', code: 'ERROR', message: toUserMessage(error) }], cancelled: false }
   }
 
-  ipcMain.handle('fs:createDirectory', async (_event, requestedPath: string, name: string): Promise<OpResult> => {
-    const busy = rejectIfBusy()
-    if (busy) return busy
-    const dir = assertAbsolutePath(requestedPath)
-    const result = await createDirectory(dir, name)
-    return result.ok
-      ? { ok: true, succeeded: [name], failed: [], cancelled: false }
-      : { ok: false, succeeded: [], failed: [{ name, code: result.code, message: result.message }], cancelled: false }
-  })
+  // SPEC.md §6.8: rename/createDirectory share the same single-flight lock
+  // as copy/move/delete (they can touch the same tree a transfer is working
+  // on). A validation failure or thrown error inside `run` is converted to
+  // a structured OpResult rather than left to reject the invoke() call, so
+  // the renderer always has a result to close its progress dialog with
+  // (A7-2 #7).
+  async function runExclusiveOp(opId: string, run: () => Promise<OpResult>): Promise<OpResult> {
+    const busyOrPromise = runExclusive(opId, async () => {
+      try {
+        return await run()
+      } catch (error) {
+        return toFailureResult(error)
+      }
+    })
+    return busyOrPromise
+  }
 
-  ipcMain.handle('fs:rename', async (_event, requestedPath: string, from: string, to: string): Promise<OpResult> => {
-    const busy = rejectIfBusy()
-    if (busy) return busy
-    const dir = assertAbsolutePath(requestedPath)
-    assertPlainNames([from])
-    assertPlainNames([to])
-    const result = await renameItem(dir, from, to)
-    return result.ok
-      ? { ok: true, succeeded: [to], failed: [], cancelled: false }
-      : { ok: false, succeeded: [], failed: [{ name: from, code: result.code, message: result.message }], cancelled: false }
-  })
+  ipcMain.handle('fs:createDirectory', async (_event, requestedPath: string, name: string): Promise<OpResult> =>
+    runExclusiveOp('createDirectory', async () => {
+      const dir = assertAbsolutePath(requestedPath)
+      const result = await createDirectory(dir, name)
+      return result.ok
+        ? { ok: true, succeeded: [name], failed: [], cancelled: false }
+        : { ok: false, succeeded: [], failed: [{ name, code: result.code, message: result.message }], cancelled: false }
+    })
+  )
 
-  ipcMain.handle('fs:copy', async (event, request: TransferRequest): Promise<OpResult> => {
-    const sourceDir = assertAbsolutePath(request.sourceDir)
-    const destDir = assertAbsolutePath(request.destDir)
-    await assertExistingDirectory(destDir)
-    const names = assertPlainNames(request.names)
-    return runExclusiveTransfer(request.opId, event, async (controller) => {
+  ipcMain.handle('fs:rename', async (_event, requestedPath: string, from: string, to: string): Promise<OpResult> =>
+    runExclusiveOp('rename', async () => {
+      const dir = assertAbsolutePath(requestedPath)
+      assertPlainNames([from])
+      assertPlainNames([to])
+      const result = await renameItem(dir, from, to)
+      return result.ok
+        ? { ok: true, succeeded: [to], failed: [], cancelled: false }
+        : { ok: false, succeeded: [], failed: [{ name: from, code: result.code, message: result.message }], cancelled: false }
+    })
+  )
+
+  ipcMain.handle('fs:copy', async (event, request: TransferRequest): Promise<OpResult> =>
+    runExclusiveOp(request.opId, async () => {
+      const sourceDir = assertAbsolutePath(request.sourceDir)
+      const destDir = assertAbsolutePath(request.destDir)
+      await assertExistingDirectory(destDir)
+      const names = assertPlainNames(request.names)
+      const controller = new AbortController()
+      controllers.set(request.opId, controller)
       const result = await copyItems({
         sourceDir,
         destDir,
         names,
         signal: controller.signal,
         onProgress: makeProgressReporter(request.opId, event),
-        onConflict: makeConflictResolver(request.opId, event)
+        onConflict: makeConflictResolver(request.opId, event, controller.signal)
       })
       return { ok: result.failed.length === 0 && !result.cancelled, ...result }
     })
-  })
+  )
 
-  ipcMain.handle('fs:move', async (event, request: TransferRequest): Promise<OpResult> => {
-    const sourceDir = assertAbsolutePath(request.sourceDir)
-    const destDir = assertAbsolutePath(request.destDir)
-    await assertExistingDirectory(destDir)
-    const names = assertPlainNames(request.names)
-    return runExclusiveTransfer(request.opId, event, async (controller) => {
+  ipcMain.handle('fs:move', async (event, request: TransferRequest): Promise<OpResult> =>
+    runExclusiveOp(request.opId, async () => {
+      const sourceDir = assertAbsolutePath(request.sourceDir)
+      const destDir = assertAbsolutePath(request.destDir)
+      await assertExistingDirectory(destDir)
+      const names = assertPlainNames(request.names)
+      const controller = new AbortController()
+      controllers.set(request.opId, controller)
       const result = await moveItems({
         sourceDir,
         destDir,
         names,
         signal: controller.signal,
         onProgress: makeProgressReporter(request.opId, event),
-        onConflict: makeConflictResolver(request.opId, event)
+        onConflict: makeConflictResolver(request.opId, event, controller.signal)
       })
       return { ok: result.failed.length === 0 && !result.cancelled, ...result }
     })
-  })
+  )
 
-  ipcMain.handle('fs:delete', async (event, request: DeleteRequest): Promise<OpResult> => {
-    const dir = assertAbsolutePath(request.dir)
-    const names = assertPlainNames(request.names)
-    return runExclusiveTransfer(request.opId, event, async (controller) => {
+  ipcMain.handle('fs:delete', async (_event, request: DeleteRequest): Promise<OpResult> =>
+    runExclusiveOp(request.opId, async () => {
+      const dir = assertAbsolutePath(request.dir)
+      const names = assertPlainNames(request.names)
+      const controller = new AbortController()
+      controllers.set(request.opId, controller)
       const result = request.permanent
         ? await deletePermanently(dir, names, controller.signal)
         : await trashItems(dir, names, controller.signal)
       return { ok: result.failed.length === 0 && !result.cancelled, ...result }
     })
-  })
+  )
 
   ipcMain.handle('fs:cancel', async (_event, opId: string): Promise<void> => {
     controllers.get(opId)?.abort()

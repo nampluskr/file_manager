@@ -169,6 +169,73 @@ describe('moveItems', () => {
     expect(await readFile(join(sourceDir, 'a.txt'), 'utf8')).toBe('incoming')
   })
 
+  it('restores the destination file if overwrite is cancelled mid-fallback-copy (A7-2 #2)', async () => {
+    await setup()
+    await writeFile(join(sourceDir, 'a.txt'), 'incoming')
+    await writeFile(join(destDir, 'a.txt'), 'original')
+    forceExdevFor = join(sourceDir, 'a.txt')
+    const controller = new AbortController()
+
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['a.txt'],
+      signal: controller.signal,
+      onProgress: () => {},
+      onConflict: async () => {
+        controller.abort() // cancellation lands mid-overwrite, before the EXDEV fallback copy runs
+        return { action: 'overwrite', applyToAll: false }
+      }
+    })
+
+    expect(result.cancelled).toBe(true)
+    expect(await readFile(join(destDir, 'a.txt'), 'utf8')).toBe('original')
+    expect(await readdir(destDir)).toEqual(['a.txt'])
+    expect(await readFile(join(sourceDir, 'a.txt'), 'utf8')).toBe('incoming')
+  })
+
+  it('rejects a folder overwriting a same-named file, and vice versa, without touching either (A7-2 #6)', async () => {
+    await setup()
+    await mkdir(join(sourceDir, 'item'))
+    await writeFile(join(destDir, 'item'), 'a file, not a folder')
+
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['item'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: autoCancel
+    })
+
+    expect(result.failed[0]).toMatchObject({ code: 'ETYPE' })
+    expect(await readFile(join(destDir, 'item'), 'utf8')).toBe('a file, not a folder')
+    expect(await readdir(join(sourceDir, 'item'))).toEqual([])
+  })
+
+  it('does not report a fully-skipped merge directory as succeeded (A7-2 #5)', async () => {
+    await setup()
+    await mkdir(join(sourceDir, 'dir'))
+    await writeFile(join(sourceDir, 'dir', 'inner.txt'), 'incoming')
+    await mkdir(join(destDir, 'dir'))
+    await writeFile(join(destDir, 'dir', 'inner.txt'), 'existing')
+
+    const result = await moveItems({
+      sourceDir,
+      destDir,
+      names: ['dir'],
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      onConflict: async () => ({ action: 'skip', applyToAll: false })
+    })
+
+    expect(result.succeeded).toEqual([])
+    expect(result.failed).toEqual([])
+    // Nothing actually moved, so the source must be untouched.
+    expect(await readFile(join(sourceDir, 'dir', 'inner.txt'), 'utf8')).toBe('incoming')
+    expect(await readFile(join(destDir, 'dir', 'inner.txt'), 'utf8')).toBe('existing')
+  })
+
   it('scopes applyToAll to the conflict kind it was decided for (A7 #9)', async () => {
     await setup()
     await writeFile(join(sourceDir, 'a.txt'), 'new-a')
