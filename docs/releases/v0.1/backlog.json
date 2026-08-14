@@ -184,7 +184,7 @@
       "id": "phase-03",
       "order": 3,
       "title": "뷰어 (F3)",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": [
         "phase-02"
       ],
