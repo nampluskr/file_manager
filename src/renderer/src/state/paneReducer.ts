@@ -6,7 +6,7 @@ import { sortEntries } from './sortEntries'
 
 export type PaneAction =
   | { type: 'loadStart' }
-  | { type: 'loadSuccess'; path: string; rawEntries: FileEntry[]; focus: FocusIntent }
+  | { type: 'loadSuccess'; path: string; rawEntries: FileEntry[]; focus: FocusIntent; preserveView?: boolean }
   | { type: 'loadError'; message: string }
   | { type: 'setFocusedIndex'; index: number }
   | { type: 'moveFocus'; delta: number }
@@ -62,8 +62,8 @@ export function paneReducer(state: PaneState, action: PaneAction): PaneState {
         entries,
         isLoading: false,
         error: null,
-        selectedNames: new Set(),
-        scrollTop: 0,
+        selectedNames: action.preserveView ? state.selectedNames : new Set(),
+        scrollTop: action.preserveView ? state.scrollTop : 0,
         focusedIndex: resolveFocusIndex(entries, action.focus)
       }
     }

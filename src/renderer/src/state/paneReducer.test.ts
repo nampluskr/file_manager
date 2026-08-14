@@ -67,6 +67,29 @@ describe('paneReducer', () => {
     expect(next.entries).toBe(state.entries)
   })
 
+  it('preserves the current view state when a swapped pane refreshes', () => {
+    let state = createInitialPaneState('C:\\')
+    state = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\',
+      rawEntries: [makeDir('a'), makeDir('b')],
+      focus: { mode: 'first' }
+    })
+    state = { ...state, selectedNames: new Set(['b']), scrollTop: 22 }
+
+    const refreshed = paneReducer(state, {
+      type: 'loadSuccess',
+      path: 'C:\\',
+      rawEntries: [makeDir('a'), makeDir('b')],
+      focus: { mode: 'byName', name: 'b', previousIndex: 1 },
+      preserveView: true
+    })
+
+    expect(refreshed.selectedNames).toEqual(new Set(['b']))
+    expect(refreshed.scrollTop).toBe(22)
+    expect(refreshed.entries[refreshed.focusedIndex]).toMatchObject({ name: 'b' })
+  })
+
   it('moveFocus clamps at the list boundaries without wrapping', () => {
     let state = createInitialPaneState('C:\\')
     state = paneReducer(state, {

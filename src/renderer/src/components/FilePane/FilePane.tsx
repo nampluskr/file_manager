@@ -20,16 +20,21 @@ type FilePaneProps = {
   initialPath: string
   initialSortKey: SortKey
   initialSortAsc: boolean
+  initialState?: PaneState
+  isActive: boolean
   overlayOpen: boolean
   onView: (path: string) => void
   onEdit: (path: string) => void
   onStateChange: (state: PaneState) => void
+  onActivate: () => void
+  onSwitchPane: () => void
+  onSwapPanes: () => void
   favorites: { key: number; label: string; path: string }[]
 }
 
-export function FilePane({ initialPath, initialSortKey, initialSortAsc, overlayOpen, onView, onEdit, onStateChange, favorites }: FilePaneProps): ReactElement {
+export function FilePane({ initialPath, initialSortKey, initialSortAsc, initialState, isActive, overlayOpen, onView, onEdit, onStateChange, onActivate, onSwitchPane, onSwapPanes, favorites }: FilePaneProps): ReactElement {
   const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, goToPath, setSort, setScrollTop, typeAhead, refresh } =
-    useFilePane(initialPath, initialSortKey, initialSortAsc)
+    useFilePane(initialPath, initialSortKey, initialSortAsc, initialState)
   const [pageSize, setPageSize] = useState(10)
   const [launcherFocused, setLauncherFocused] = useState(false)
   const [favoritesOpen, setFavoritesOpen] = useState(false)
@@ -39,8 +44,8 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, overlayO
   // Without this, Arrow/Enter/Backspace do nothing until the user clicks
   // the pane or tabs into it (SPEC.md §4.3 expects them to work immediately).
   useEffect(() => {
-    paneRef.current?.focus()
-  }, [])
+    if (isActive && !overlayOpen) paneRef.current?.focus()
+  }, [isActive, overlayOpen])
 
   useEffect(() => onStateChange(state), [onStateChange, state])
 
@@ -70,6 +75,11 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, overlayO
       return
     }
     if (event.ctrlKey) {
+      if (event.key.toLowerCase() === 'u') {
+        event.preventDefault()
+        onSwapPanes()
+        return
+      }
       if (event.key.toLowerCase() === 'l') {
         event.preventDefault()
         setLauncherFocused(true)
@@ -114,6 +124,10 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, overlayO
     if (launcherFocused) return
 
     switch (event.key) {
+      case 'Tab':
+        event.preventDefault()
+        onSwitchPane()
+        return
       case 'F3': {
         const focused = state.entries[state.focusedIndex]
         if (!focused || focused.isDirectory || focused.isParent) return
@@ -171,11 +185,14 @@ export function FilePane({ initialPath, initialSortKey, initialSortAsc, overlayO
   return (
     <div
       ref={paneRef}
-      className="file-pane"
+      className={isActive ? 'file-pane file-pane-active' : 'file-pane'}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onFocus={(event) => {
-        if (event.target === event.currentTarget) setLauncherFocused(false)
+        if (event.target === event.currentTarget) {
+          setLauncherFocused(false)
+          onActivate()
+        }
       }}
     >
       <PathBar path={state.currentPath} />

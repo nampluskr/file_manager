@@ -9,6 +9,8 @@ export function App(): ReactElement {
   const [viewerPath, setViewerPath] = useState<string | null>(null)
   const [editorPath, setEditorPath] = useState<string | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [paneSnapshots, setPaneSnapshots] = useState<Partial<Record<'left' | 'right', PaneState>>>({})
+  const [paneInstance, setPaneInstance] = useState({ left: 0, right: 0 })
   const saveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -27,12 +29,36 @@ export function App(): ReactElement {
     }
   }, [settings])
 
-  const handlePaneStateChange = useCallback((pane: PaneState) => {
+  const handlePaneStateChange = useCallback((side: 'left' | 'right', pane: PaneState) => {
+    setPaneSnapshots((current) => ({ ...current, [side]: pane }))
     setSettings((current) => {
       if (!current) return current
-      const left = current.panes.left
-      if (left.path === pane.currentPath && left.sortKey === pane.sortKey && left.sortAsc === pane.sortAsc) return current
-      return { ...current, panes: { ...current.panes, left: { path: pane.currentPath, sortKey: pane.sortKey, sortAsc: pane.sortAsc } } }
+      const savedPane = current.panes[side]
+      if (savedPane.path === pane.currentPath && savedPane.sortKey === pane.sortKey && savedPane.sortAsc === pane.sortAsc) return current
+      return {
+        ...current,
+        panes: { ...current.panes, [side]: { path: pane.currentPath, sortKey: pane.sortKey, sortAsc: pane.sortAsc } }
+      }
+    })
+  }, [])
+
+  const handleLeftPaneStateChange = useCallback((pane: PaneState) => handlePaneStateChange('left', pane), [handlePaneStateChange])
+  const handleRightPaneStateChange = useCallback((pane: PaneState) => handlePaneStateChange('right', pane), [handlePaneStateChange])
+
+  const activatePane = useCallback((side: 'left' | 'right') => {
+    setSettings((current) => current && current.activePane === side ? current : current && { ...current, activePane: side })
+  }, [])
+
+  const switchPane = useCallback(() => {
+    setSettings((current) => current && { ...current, activePane: current.activePane === 'left' ? 'right' : 'left' })
+  }, [])
+
+  const swapPanes = useCallback(() => {
+    setPaneSnapshots((current) => ({ left: current.right, right: current.left }))
+    setPaneInstance((current) => ({ left: current.left + 1, right: current.right + 1 }))
+    setSettings((current) => current && {
+      ...current,
+      panes: { left: current.panes.right, right: current.panes.left }
     })
   }, [])
 
@@ -40,16 +66,27 @@ export function App(): ReactElement {
 
   return (
     <>
-      <FilePane
-        initialPath={settings.panes.left.path}
-        initialSortKey={settings.panes.left.sortKey}
-        initialSortAsc={settings.panes.left.sortAsc}
-        overlayOpen={viewerPath !== null || editorPath !== null}
-        onView={setViewerPath}
-        onEdit={setEditorPath}
-        onStateChange={handlePaneStateChange}
-        favorites={settings.favorites}
-      />
+      <div className="file-pane-layout">
+        {(['left', 'right'] as const).map((side) => {
+          const pane = settings.panes[side]
+          return <FilePane
+            key={`${side}-${paneInstance[side]}`}
+            initialPath={pane.path}
+            initialSortKey={pane.sortKey}
+            initialSortAsc={pane.sortAsc}
+            initialState={paneSnapshots[side]}
+            isActive={settings.activePane === side}
+            overlayOpen={viewerPath !== null || editorPath !== null}
+            onView={setViewerPath}
+            onEdit={setEditorPath}
+            onStateChange={side === 'left' ? handleLeftPaneStateChange : handleRightPaneStateChange}
+            onActivate={() => activatePane(side)}
+            onSwitchPane={switchPane}
+            onSwapPanes={swapPanes}
+            favorites={settings.favorites}
+          />
+        })}
+      </div>
       {viewerPath ? <Viewer path={viewerPath} onClose={() => setViewerPath(null)} /> : null}
       {editorPath ? <Editor path={editorPath} onClose={() => setEditorPath(null)} /> : null}
     </>

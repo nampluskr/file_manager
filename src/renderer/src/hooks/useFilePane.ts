@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import type { SortKey } from '../../../shared/types'
+import type { PaneState, SortKey } from '../../../shared/types'
 import type { FocusIntent } from '../state/focus'
 import { createInitialPaneState, paneReducer } from '../state/paneReducer'
 import { getParentPath, joinPath, lastSegment } from '../state/pathHelpers'
 
 const TYPE_AHEAD_RESET_MS = 1000
 
-export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name', initialSortAsc = true) {
-  const [state, dispatch] = useReducer(paneReducer, initialPath, (path) =>
-    createInitialPaneState(path, initialSortKey, initialSortAsc)
+export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name', initialSortAsc = true, initialState?: PaneState) {
+  const [state, dispatch] = useReducer(paneReducer, initialState, (snapshot) =>
+    snapshot
+      ? { ...snapshot, selectedNames: new Set(snapshot.selectedNames) }
+      : createInitialPaneState(initialPath, initialSortKey, initialSortAsc)
   )
   const typeAheadBufferRef = useRef('')
   const typeAheadTimerRef = useRef<number | null>(null)
@@ -16,14 +18,14 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
   // navigate() call overwriting a later one that resolves first (SPEC.md §4.1).
   const requestIdRef = useRef(0)
 
-  const navigate = useCallback((path: string, focus: FocusIntent) => {
+  const navigate = useCallback((path: string, focus: FocusIntent, preserveView = false) => {
     const requestId = ++requestIdRef.current
     dispatch({ type: 'loadStart' })
     window.fileManager
       .listDirectory(path)
       .then((result) => {
         if (requestIdRef.current !== requestId) return
-        dispatch({ type: 'loadSuccess', path: result.path, rawEntries: result.entries, focus })
+        dispatch({ type: 'loadSuccess', path: result.path, rawEntries: result.entries, focus, preserveView })
       })
       .catch((error: unknown) => {
         if (requestIdRef.current !== requestId) return
@@ -33,7 +35,12 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
   }, [])
 
   useEffect(() => {
-    navigate(initialPath, { mode: 'first' })
+    const focused = state.entries[state.focusedIndex]
+    navigate(
+      state.currentPath,
+      focused ? { mode: 'byName', name: focused.name, previousIndex: state.focusedIndex } : { mode: 'first' },
+      initialState !== undefined
+    )
     // Only run once on mount; `navigate` and `initialPath` are stable for the pane's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

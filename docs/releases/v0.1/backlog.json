@@ -329,7 +329,7 @@
       "id": "phase-06",
       "order": 6,
       "title": "듀얼 패널",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": [
         "phase-05"
       ],
