@@ -197,3 +197,50 @@ body {
 .viewer-error {
   color: var(--error-text);
 }
+
+.editor-overlay {
+  background: var(--background);
+  display: flex;
+  flex-direction: column;
+  inset: 0;
+  outline: none;
+  position: fixed;
+  z-index: 10;
+}
+
+.editor-header {
+  align-items: center;
+  background: var(--header-background);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.editor-header button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  margin-left: 6px;
+}
+
+.editor-textarea {
+  background: var(--background);
+  border: 0;
+  color: var(--text-primary);
+  flex: 1;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  min-height: 0;
+  outline: none;
+  padding: 12px;
+  resize: none;
+}
+
+.editor-error,
+.editor-message {
+  margin: 8px 12px;
+}
+
+.editor-error {
+  color: var(--error-text);
+}

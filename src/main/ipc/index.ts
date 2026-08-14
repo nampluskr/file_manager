@@ -7,6 +7,8 @@ import { listDirectory } from '../filesystem/listDirectory'
 import { toUserMessage } from '../filesystem/errorMessages'
 import { isPresetId, launchPreset } from '../filesystem/launcher'
 import { readTextFile } from '../filesystem/readTextFile'
+import { writeTextFile } from '../filesystem/writeTextFile'
+import type { WriteTextRequest } from '../../shared/ipc'
 import type { FileEntry } from '../../shared/types'
 
 // SPEC.md §12.3: Main validates every path a Renderer sends.
@@ -14,6 +16,7 @@ function assertAbsolutePath(requestedPath: string): string {
   if (typeof requestedPath !== 'string' || requestedPath.length === 0) {
     throw new Error('경로가 올바르지 않습니다')
   }
+  if (!isAbsolute(requestedPath)) throw new Error('경로가 올바르지 않습니다')
   const resolved = resolve(requestedPath)
   if (!isAbsolute(resolved)) throw new Error('경로가 올바르지 않습니다')
   return resolved
@@ -54,6 +57,21 @@ export function registerIpcHandlers(): void {
     } catch (error) {
       throw new Error(toUserMessage(error))
     }
+  })
+
+  ipcMain.handle('file:writeText', async (_event, request: WriteTextRequest) => {
+    const path = assertAbsolutePath(request.path)
+    try {
+      return await writeTextFile({ ...request, path })
+    } catch (error) {
+      return { ok: false as const, reason: 'error' as const, code: 'WRITE_FAILED', message: toUserMessage(error) }
+    }
+  })
+
+  ipcMain.handle('sys:openInCode', async (_event, requestedPath: string): Promise<void> => {
+    const path = assertAbsolutePath(requestedPath)
+    const url = `vscode://file/${encodeURI(path.replace(/\\/g, '/'))}`
+    await shell.openExternal(url)
   })
 
   ipcMain.handle('sys:launch', async (_event, preset: unknown, requestedPath: string) => {

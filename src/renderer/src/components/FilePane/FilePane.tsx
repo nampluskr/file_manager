@@ -15,9 +15,9 @@ const SORT_KEY_BY_FUNCTION_KEY: Record<string, 'name' | 'ext' | 'mtime' | 'size'
   F6: 'size'
 }
 
-type FilePaneProps = { initialPath: string; overlayOpen: boolean; onView: (path: string) => void }
+type FilePaneProps = { initialPath: string; overlayOpen: boolean; onView: (path: string) => void; onEdit: (path: string) => void }
 
-export function FilePane({ initialPath, overlayOpen, onView }: FilePaneProps): ReactElement {
+export function FilePane({ initialPath, overlayOpen, onView, onEdit }: FilePaneProps): ReactElement {
   const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, setSort, setScrollTop, typeAhead } =
     useFilePane(initialPath)
   const [pageSize, setPageSize] = useState(10)
@@ -64,6 +64,13 @@ export function FilePane({ initialPath, overlayOpen, onView }: FilePaneProps): R
         if (!focused || focused.isDirectory || focused.isParent) return
         event.preventDefault()
         onView(joinPath(state.currentPath, focused.name))
+        return
+      }
+      case 'F4': {
+        const focused = state.entries[state.focusedIndex]
+        if (!focused || focused.isDirectory || focused.isParent) return
+        event.preventDefault()
+        onEdit(joinPath(state.currentPath, focused.name))
         return
       }
       case 'ArrowDown':

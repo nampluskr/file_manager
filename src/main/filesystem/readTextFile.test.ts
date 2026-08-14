@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { readTextFile } from './readTextFile'
+import { MAX_EDITABLE_FILE_BYTES, readTextFile } from './readTextFile'
 
 describe('readTextFile', () => {
   let fixtureDir = ''
@@ -30,5 +30,10 @@ describe('readTextFile', () => {
   it('falls back to CP949-compatible euc-kr decoding when UTF-8 validation fails', async () => {
     const result = await readTextFile(await createFile('korean.txt', Buffer.from([0xb0, 0xa1, 0xb3, 0xaa])))
     expect(result).toMatchObject({ content: '가나', encoding: 'cp949', editable: true })
+  })
+
+  it('blocks editing files larger than one mebibyte', async () => {
+    const result = await readTextFile(await createFile('large.txt', Buffer.alloc(MAX_EDITABLE_FILE_BYTES + 1, 0x61)))
+    expect(result).toMatchObject({ editable: false, reason: 'Files larger than 1 MB can only be opened in VSCode.' })
   })
 })

@@ -32,6 +32,7 @@ export type ReadTextResult = {
   encoding: 'utf8' | 'utf8-bom' | 'cp949'
   eol: 'crlf' | 'lf'
   mtime: number
+  hash: string
   editable: boolean // false when encoding detection failed or the file is too large
   reason?: string // why editable is false
 }
@@ -42,11 +43,12 @@ export type WriteTextRequest = {
   encoding: ReadTextResult['encoding']
   eol: ReadTextResult['eol']
   expectedMtime: number
+  expectedHash: string
   force: boolean // overwrite even if mtime no longer matches
 }
 
 export type WriteTextResult =
-  | { ok: true; mtime: number }
+  | { ok: true; mtime: number; hash: string }
   | { ok: false; reason: 'mtime-mismatch'; actualMtime: number }
   | { ok: false; reason: 'error'; code: string; message: string }
 
@@ -71,6 +73,7 @@ export type IpcContract = {
   'sys:driveUsage': (letter: string) => { free: number; total: number }
   'sys:fileIcon': (ext: string) => string // data URL
   'sys:openPath': (path: string) => void // default associated program
+  'sys:openInCode': (path: string) => void
   'sys:launch': (preset: PresetId, cwd: string) => OpResult
 
   'config:load': () => Settings
