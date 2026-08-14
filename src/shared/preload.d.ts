@@ -1,10 +1,11 @@
+import type { PingResult } from './ipc'
+
 export {}
 
 declare global {
   interface Window {
     fileManager: {
-      platform: NodeJS.Platform
-      ping: () => Promise<{ message: string; receivedAt: number }>
+      ping: () => Promise<PingResult>
     }
   }
 }

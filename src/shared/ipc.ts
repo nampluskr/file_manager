@@ -4,6 +4,13 @@
 
 import type { FileEntry, Settings } from './types'
 
+// Phase 0 scaffolding channel and payload type, kept out of IpcContract
+// below (which mirrors only the production channels from SPEC.md §11.2).
+// Both preload and main import this single definition so a mismatch
+// between the two sides is a type error, not a silent runtime bug.
+export const PING_CHANNEL = 'app:ping'
+export type PingResult = { message: string; receivedAt: number }
+
 export type ConflictAction = 'overwrite' | 'skip' | 'rename' | 'cancel'
 
 export type TransferRequest = {

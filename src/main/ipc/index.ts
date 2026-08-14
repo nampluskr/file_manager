@@ -4,9 +4,10 @@
 // implemented in later phases.
 
 import { ipcMain } from 'electron'
+import { PING_CHANNEL, type PingResult } from '../../shared/ipc'
 
 export function registerIpcHandlers(): void {
-  ipcMain.handle('app:ping', (): { message: string; receivedAt: number } => {
+  ipcMain.handle(PING_CHANNEL, (): PingResult => {
     return { message: 'pong', receivedAt: Date.now() }
   })
 }

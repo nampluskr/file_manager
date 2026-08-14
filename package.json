@@ -10,7 +10,8 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "check:boundary": "node scripts/checkFilesystemBoundary.mjs",
+    "test": "npm run check:boundary && vitest run",
     "package:win": "npm run build && electron-builder --win portable --publish never"
   },
   "dependencies": {
