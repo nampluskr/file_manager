@@ -229,7 +229,7 @@
       "id": "phase-04",
       "order": 4,
       "title": "편집기 (F4)",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": [
         "phase-03"
       ],
