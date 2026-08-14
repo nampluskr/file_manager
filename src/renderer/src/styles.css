@@ -154,3 +154,46 @@ body {
   color: var(--error-text);
   margin-top: 4px;
 }
+
+.viewer-overlay {
+  align-items: stretch;
+  background: var(--background);
+  display: flex;
+  flex-direction: column;
+  inset: 0;
+  outline: none;
+  position: fixed;
+  z-index: 10;
+}
+
+.viewer-header {
+  align-items: center;
+  background: var(--header-background);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.viewer-header button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.viewer-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.viewer-content pre {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.viewer-error {
+  color: var(--error-text);
+}

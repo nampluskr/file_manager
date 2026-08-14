@@ -18,7 +18,9 @@
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^4.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -35,9 +37,18 @@
   "build": {
     "appId": "com.nampluskr.personalfilemanager",
     "productName": "Personal File Manager",
-    "directories": { "output": "release" },
-    "files": ["out/**/*", "package.json"],
-    "win": { "target": ["portable"] },
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
     "portable": {
       "artifactName": "${productName}-${version}-Portable.${ext}"
     }

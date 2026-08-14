@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process'
 import { listDirectory } from '../filesystem/listDirectory'
 import { toUserMessage } from '../filesystem/errorMessages'
 import { isPresetId, launchPreset } from '../filesystem/launcher'
+import { readTextFile } from '../filesystem/readTextFile'
 import type { FileEntry } from '../../shared/types'
 
 // SPEC.md §12.3: Main validates every path a Renderer sends.
@@ -43,6 +44,15 @@ export function registerIpcHandlers(): void {
     const failureMessage = await shell.openPath(path)
     if (failureMessage) {
       console.error(`sys:openPath failed for ${path}: ${failureMessage}`)
+    }
+  })
+
+  ipcMain.handle('file:readText', async (_event, requestedPath: string) => {
+    const path = assertAbsolutePath(requestedPath)
+    try {
+      return await readTextFile(path)
+    } catch (error) {
+      throw new Error(toUserMessage(error))
     }
   })
 

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { FileEntry } from '../shared/types'
 import type { OpResult, PresetId } from '../shared/ipc'
+import type { ReadTextResult } from '../shared/ipc'
 
 contextBridge.exposeInMainWorld('fileManager', {
   // Read synchronously in the preload's own Node context; no IPC round
@@ -13,4 +14,6 @@ contextBridge.exposeInMainWorld('fileManager', {
   openPath: (path: string): Promise<void> => ipcRenderer.invoke('sys:openPath', path),
 
   launch: (preset: PresetId, cwd: string): Promise<OpResult> => ipcRenderer.invoke('sys:launch', preset, cwd)
+  ,
+  readText: (path: string): Promise<ReadTextResult> => ipcRenderer.invoke('file:readText', path)
 })

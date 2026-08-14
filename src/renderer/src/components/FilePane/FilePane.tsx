@@ -4,6 +4,7 @@ import { useFilePane } from '../../hooks/useFilePane'
 import { FileList } from '../FileList/FileList'
 import { PathBar } from '../PathBar/PathBar'
 import { CommandLauncher } from '../CommandLauncher/CommandLauncher'
+import { joinPath } from '../../state/pathHelpers'
 
 const PRINTABLE_KEY_PATTERN = /^[\p{L}\p{N}]$/u
 
@@ -14,9 +15,9 @@ const SORT_KEY_BY_FUNCTION_KEY: Record<string, 'name' | 'ext' | 'mtime' | 'size'
   F6: 'size'
 }
 
-type FilePaneProps = { initialPath: string }
+type FilePaneProps = { initialPath: string; overlayOpen: boolean; onView: (path: string) => void }
 
-export function FilePane({ initialPath }: FilePaneProps): ReactElement {
+export function FilePane({ initialPath, overlayOpen, onView }: FilePaneProps): ReactElement {
   const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, setSort, setScrollTop, typeAhead } =
     useFilePane(initialPath)
   const [pageSize, setPageSize] = useState(10)
@@ -30,6 +31,7 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
   }, [])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (overlayOpen) return
     if (event.ctrlKey) {
       if (event.key.toLowerCase() === 'l') {
         event.preventDefault()
@@ -57,6 +59,13 @@ export function FilePane({ initialPath }: FilePaneProps): ReactElement {
     if (launcherFocused) return
 
     switch (event.key) {
+      case 'F3': {
+        const focused = state.entries[state.focusedIndex]
+        if (!focused || focused.isDirectory || focused.isParent) return
+        event.preventDefault()
+        onView(joinPath(state.currentPath, focused.name))
+        return
+      }
       case 'ArrowDown':
         event.preventDefault()
         moveFocus(1)
