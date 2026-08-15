@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, Menu, nativeImage, session, Tray } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, Menu, nativeImage, session, Tray } from 'electron'
 import type { NativeImage } from 'electron'
 import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
@@ -7,13 +7,18 @@ import { createDefaultSettings, restoreSettings, saveSettings } from './config/s
 
 // SPEC.md §10.4: up to 24 drive probes (C:-Z:) run concurrently at startup,
 // and a disconnected network drive occupies a libuv threadpool slot for the
-// full probe timeout without actually cancelling. The default pool size (4)
-// would let a handful of stuck probes serialize behind each other and delay
-// unrelated fs work (e.g. a listDirectory issued around the same time).
+// full probe timeout without actually cancelling -- withTimeout() in
+// drives.ts only bounds how long the *caller* waits, not the underlying
+// statfs() call itself. Sized to cover all 24 probes plus headroom for
+// concurrent listDirectory/lstat work issued around the same time (A8 #1);
+// 16 left up to 8 unrelated fs calls fully serialized behind worst-case
+// probes. This still does not make the probes cancellable -- it only keeps
+// them from exhausting the pool -- the same accepted trade-off already made
+// for listDirectory's per-entry lstat timeout (see filesystem/timeoutUtils.ts).
 // Must be set before any async fs call is made -- it is read lazily on the
 // first threadpool submission, not at process start, so setting it here
 // (before app.whenReady() triggers any fs work) is early enough.
-process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE ?? '16'
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE ?? '32'
 
 // SPEC.md §19.1: closing the window hides it instead of quitting. Without a
 // way to fully exit, the only path left is Task Manager -- a tray icon with
@@ -22,6 +27,12 @@ process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE ?? '16'
 // actual app.quit() (from the tray menu or `before-quit`).
 let isQuitting = false
 let tray: Tray | null = null
+// Set once the main window exists; 'before-quit' awaits this so the final
+// settings write (window bounds) is not truncated by the process exiting
+// mid-write (A8 #5) -- Electron does not wait for pending promises once
+// quit is finalized, so app.quit() from the tray's Quit item or the OS
+// otherwise has no guarantee the in-flight saveSettings() completes.
+let persistBoundsFn: (() => Promise<void>) | null = null
 
 function createTrayIcon(): NativeImage {
   const size = 16
@@ -152,22 +163,25 @@ if (!singleInstanceAcquired) {
       mainWindow = window
       tray = createTray(window)
 
-      function persistWindowBounds(): void {
+      async function persistWindowBounds(): Promise<void> {
         const bounds = window.getBounds()
-        void restoreSettings(settingsPath, defaults).then((current) =>
-          saveSettings(settingsPath, { ...current, window: { width: bounds.width, height: bounds.height, x: bounds.x, y: bounds.y } })
-        )
+        const current = await restoreSettings(settingsPath, defaults)
+        await saveSettings(settingsPath, { ...current, window: { width: bounds.width, height: bounds.height, x: bounds.x, y: bounds.y } })
       }
+      persistBoundsFn = persistWindowBounds
 
-      // SPEC.md §19.1: closing the window hides it instead of quitting.
+      // SPEC.md §19.1: closing the window hides it instead of quitting. The
+      // isQuitting branch here fires only for a 'close' that 'before-quit'
+      // already let through (see below) -- that handler is the one that
+      // actually awaits persistence, so this is fire-and-forget by design.
       window.on('close', (event) => {
         if (isQuitting) {
-          persistWindowBounds()
+          void persistWindowBounds()
           return
         }
         event.preventDefault()
         window.hide()
-        persistWindowBounds()
+        void persistWindowBounds()
       })
 
       const hotkeyRegistered = globalShortcut.register(settings.globalHotkey, () => {
@@ -178,10 +192,17 @@ if (!singleInstanceAcquired) {
         }
       })
       // globalShortcut.register() returns false instead of throwing when
-      // another app already owns the accelerator -- silently ignoring that
-      // would leave the hotkey permanently dead with no indication why.
+      // another app already owns the accelerator. console.error() alone is
+      // invisible in a packaged build (no console attached), which would
+      // leave the show/hide hotkey permanently and silently dead (A8 #7) --
+      // a one-time native dialog surfaces it without building a renderer
+      // notification channel just for this rare case.
       if (!hotkeyRegistered) {
         console.error(`Failed to register global hotkey "${settings.globalHotkey}": already in use by another application.`)
+        dialog.showErrorBox(
+          'Personal File Manager',
+          `전역 단축키(${settings.globalHotkey})를 등록하지 못했습니다. 다른 프로그램이 이미 사용 중일 수 있습니다. 창 표시/숨김 전환은 트레이 아이콘을 이용하세요.`
+        )
       }
     })
 
@@ -190,8 +211,20 @@ if (!singleInstanceAcquired) {
     })
   })
 
-  app.on('before-quit', () => {
+  // Gates the actual quit on the final settings write finishing (A8 #5).
+  // The first 'before-quit' (from the tray's Quit item, Alt+F4-then-real-
+  // close, or the OS) is intercepted; once persistBoundsFn's promise
+  // settles, quitPersisted flips and the re-issued app.quit() falls through
+  // this same handler without looping.
+  let quitPersisted = false
+  app.on('before-quit', (event) => {
     isQuitting = true
+    if (quitPersisted || !persistBoundsFn) return
+    event.preventDefault()
+    void persistBoundsFn().finally(() => {
+      quitPersisted = true
+      app.quit()
+    })
   })
 
   app.on('will-quit', () => {

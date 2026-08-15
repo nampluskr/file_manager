@@ -49,4 +49,18 @@ describe('settings', () => {
     expect(restored.panes.left.path).toBe(fixtureDir)
     expect(restored.favorites).toEqual(saved.favorites)
   })
+
+  // A8 #5: two full-snapshot writers (the renderer's debounced autosave and
+  // main's window-close bounds update) can both call saveSettings() around
+  // the same moment. Both must land intact -- neither a lost write nor a
+  // temp-filename collision from sharing the same millisecond.
+  it('serializes concurrent saves instead of racing their temp files', async () => {
+    const { settingsPath, defaults } = await createFixture()
+    const theme: Array<'dark' | 'light'> = ['dark', 'light']
+    await Promise.all(theme.map((value, index) => saveSettings(settingsPath, { ...defaults, theme: value, activePane: index === 0 ? 'left' : 'right' })))
+    const restored = await restoreSettings(settingsPath, defaults)
+    // Whichever write actually landed last, it must be a complete, valid
+    // snapshot -- not a mix of the two concurrent writers' fields.
+    expect(restored.activePane).toBe(restored.theme === 'dark' ? 'left' : 'right')
+  })
 })

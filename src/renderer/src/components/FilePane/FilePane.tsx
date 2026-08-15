@@ -119,6 +119,11 @@ export function FilePane({
   const opIdRef = useRef<string | null>(null)
   const isFirstRefreshToken = useRef(true)
   const driveLetter = driveLetterOf(state.currentPath)
+  // Guards against a slow driveUsage() response for a drive the pane has
+  // since navigated away from overwriting the currently-shown drive's
+  // capacity once it finally resolves (A8 #6, mirrors requestIdRef in
+  // useFilePane.ts for the same class of race on listDirectory).
+  const driveUsageRequestRef = useRef(0)
 
   // Without this, Arrow/Enter/Backspace do nothing until the user clicks
   // the pane or tabs into it (SPEC.md §4.3 expects them to work immediately).
@@ -130,13 +135,19 @@ export function FilePane({
 
   // Fetches this pane's drive capacity without disturbing whatever value is
   // already shown -- SPEC.md §10.3: "값이 도착하기 전에는 이전 값 또는
-  // 빈칸을 유지한다".
+  // 빈칸을 유지한다". A response is applied only if no newer request has
+  // been issued in the meantime (A8 #6).
   function refreshDriveUsage(letter: string): void {
     if (!letter) return
+    const requestId = ++driveUsageRequestRef.current
     window.fileManager
       .driveUsage(letter)
-      .then(setDriveUsage)
-      .catch(() => setDriveUsage(null))
+      .then((usage) => {
+        if (driveUsageRequestRef.current === requestId) setDriveUsage(usage)
+      })
+      .catch(() => {
+        if (driveUsageRequestRef.current === requestId) setDriveUsage(null)
+      })
   }
 
   useEffect(() => {
@@ -176,22 +187,40 @@ export function FilePane({
   // focus is still sitting in the other pane -- so both the trigger and the
   // menu's own navigation are handled on a window-level listener instead of
   // paneRef's onKeyDown, which only fires while this pane is focused.
+  //
+  // This must run in the CAPTURE phase and call stopImmediatePropagation()
+  // once the menu is open: a bubble-phase listener's preventDefault() does
+  // not stop the *other* pane's own bubble-phase listener (registered on
+  // the same window target) or that pane's local onKeyDown from also
+  // reacting to the same Arrow/Enter keypress -- e.g. opening the left
+  // pane's menu with Alt+F1 while the right pane has DOM focus previously
+  // let ArrowDown/Enter both navigate the left menu *and* move focus or
+  // activate a file in the right pane (A8 #4). Capture + stopImmediate
+  // intercepts the key before either pane's bubble-phase handling runs, for
+  // both panes, regardless of registration order.
   useEffect(() => {
     const handleDriveMenuKey = (event: KeyboardEvent): void => {
       if (driveMenuOpen) {
+        // Ctrl+Shift+D is the one global exception that must still reach
+        // App.tsx's own capture-phase listener even while this menu traps
+        // every other key (SPEC.md §16.6/§16.7).
+        if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'd') return
+        // Every other key is swallowed while the menu is open (not just the
+        // ones with a defined action), the same way the dialog/favorites
+        // overlays below trap keys -- otherwise an unhandled key would fall
+        // through capture phase and still reach the owning pane's own
+        // type-ahead/navigation.
+        event.preventDefault()
+        event.stopImmediatePropagation()
         if (event.key === 'Escape') {
-          event.preventDefault()
           setDriveMenuOpen(false)
         } else if (event.key === 'ArrowDown' && drives && drives.length > 0) {
-          event.preventDefault()
           setDriveMenuIndex((index) => Math.min(index + 1, drives.length - 1))
         } else if (event.key === 'ArrowUp' && drives && drives.length > 0) {
-          event.preventDefault()
           setDriveMenuIndex((index) => Math.max(index - 1, 0))
         } else if (event.key === 'Enter') {
           const drive = drives?.[driveMenuIndex]
           if (drive) {
-            event.preventDefault()
             goToPath(`${drive.letter}:\\`)
             setDriveMenuOpen(false)
           }
@@ -201,11 +230,12 @@ export function FilePane({
       if (!event.altKey || event.key !== DRIVE_MENU_KEY[side]) return
       if (overlayOpen || dialog || favoritesOpen) return
       event.preventDefault()
+      event.stopImmediatePropagation()
       setDriveMenuIndex(0)
       setDriveMenuOpen(true)
     }
-    window.addEventListener('keydown', handleDriveMenuKey)
-    return () => window.removeEventListener('keydown', handleDriveMenuKey)
+    window.addEventListener('keydown', handleDriveMenuKey, true)
+    return () => window.removeEventListener('keydown', handleDriveMenuKey, true)
   }, [side, overlayOpen, dialog, favoritesOpen, driveMenuOpen, driveMenuIndex, drives, goToPath])
 
   useEffect(() => {
@@ -332,12 +362,9 @@ export function FilePane({
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (overlayOpen) return
 
-    // The drive menu's own navigation is handled by the window-level
-    // listener above (it must work even when the *other* pane is focused);
-    // returning early here just stops this pane's own Arrow/Enter handling
-    // from double-firing on the same keypress when this pane happens to be
-    // the focused one.
-    if (driveMenuOpen) return
+    // No driveMenuOpen guard needed here: the capture-phase listener above
+    // calls stopImmediatePropagation() for every key while any pane's drive
+    // menu is open, so this bubble-phase handler never sees those events.
 
     if (dialog) {
       if (dialog.kind === 'progress') {

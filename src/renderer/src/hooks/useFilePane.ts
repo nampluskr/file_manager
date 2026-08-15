@@ -93,8 +93,15 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
 
   // Tracks the last plain/ctrl click for Shift+Click range selection.
   // Kept in a ref (not reducer state) because it is UI interaction history,
-  // not part of the persisted/serializable pane state.
+  // not part of the persisted/serializable pane state. Reset whenever
+  // `entries` is rebuilt (navigate, refresh, or re-sort) -- otherwise a
+  // stale numeric index left over from a different directory or a different
+  // sort order can feed selectRange() an unrelated span (A8 #8).
   const rangeAnchorRef = useRef(0)
+  useEffect(() => {
+    rangeAnchorRef.current = 0
+  }, [state.entries])
+
   const selectClick = useCallback((index: number, ctrlKey: boolean, shiftKey: boolean) => {
     if (shiftKey) {
       dispatch({ type: 'selectRange', from: rangeAnchorRef.current, to: index })

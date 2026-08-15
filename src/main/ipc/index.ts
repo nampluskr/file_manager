@@ -359,8 +359,13 @@ export function registerIpcHandlers(): void {
     return driveUsage(requestedLetter.toUpperCase())
   })
 
+  // SPEC.md §12.3: an extension is joined into a probe file path in
+  // icons.ts, so it must be validated the same way a path segment would be
+  // -- no separators, no ".." traversal, no NUL, bounded length (A8 #2).
   ipcMain.handle('sys:fileIcon', async (_event, requestedExt: unknown): Promise<string> => {
-    if (typeof requestedExt !== 'string') throw new Error('잘못된 확장자입니다')
+    if (typeof requestedExt !== 'string' || !/^[A-Za-z0-9_-]{0,32}$/.test(requestedExt)) {
+      throw new Error('잘못된 확장자입니다')
+    }
     return getFileIconDataUrl(requestedExt)
   })
 

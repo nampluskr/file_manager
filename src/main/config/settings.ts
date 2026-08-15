@@ -104,10 +104,33 @@ export async function restoreSettings(settingsPath: string, defaults: Settings):
   }
 }
 
-export async function saveSettings(settingsPath: string, settings: Settings): Promise<void> {
+let writeCounter = 0
+
+async function writeSettingsFile(settingsPath: string, settings: Settings): Promise<void> {
   if (!isSettings(settings)) throw new Error('Invalid settings.')
   await mkdir(dirname(settingsPath), { recursive: true })
-  const temporaryPath = join(dirname(settingsPath), `.${Date.now()}-settings.json.tmp`)
+  // A counter (not just Date.now()) keeps two saves issued in the same
+  // millisecond -- e.g. the renderer's debounced autosave landing next to a
+  // window-close bounds update -- from generating the same temp filename
+  // and racing each other's write/rename (A8 #5).
+  const temporaryPath = join(dirname(settingsPath), `.${Date.now()}-${++writeCounter}-settings.json.tmp`)
   await writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8')
   await rename(temporaryPath, settingsPath)
+}
+
+// Two independent callers -- the renderer's config:save IPC handler and
+// main's own window-close/quit bounds persistence -- can both want to write
+// settings.json around the same moment. Without serialization the two
+// full-snapshot writes race and whichever finishes last silently wins,
+// possibly restoring a stale path/theme/sort/bounds (A8 #5). Every caller
+// in this file goes through this single queue instead of calling
+// writeSettingsFile() directly.
+let saveQueue: Promise<void> = Promise.resolve()
+
+export function saveSettings(settingsPath: string, settings: Settings): Promise<void> {
+  const next = saveQueue.then(() => writeSettingsFile(settingsPath, settings))
+  // Swallow so one failed save doesn't permanently wedge the queue for
+  // later callers; each caller still gets its own rejection via `next`.
+  saveQueue = next.catch(() => undefined)
+  return next
 }

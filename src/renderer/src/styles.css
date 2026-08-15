@@ -13,6 +13,7 @@
   --status-bar: #007acc;
   --command-bar: #252526;
   --error-text: #f48771;
+  --overlay-scrim: rgb(0 0 0 / 45%);
 }
 
 :root[data-theme='light'] {
@@ -28,6 +29,10 @@
   --status-bar: #0066b8;
   --command-bar: #f3f3f3;
   --error-text: #b02a1e;
+  /* Same value in both themes on purpose: a translucent black scrim reads
+     correctly as a dimmer over either palette's content (A8 #9 -- tracked
+     as a token rather than left as two hardcoded literals). */
+  --overlay-scrim: rgb(0 0 0 / 45%);
 }
 
 .app-shell {
@@ -45,7 +50,7 @@
 
 .favorites-overlay {
   align-items: center;
-  background: rgb(0 0 0 / 45%);
+  background: var(--overlay-scrim);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -230,7 +235,7 @@ body {
 
 .op-dialog-overlay {
   align-items: center;
-  background: rgb(0 0 0 / 45%);
+  background: var(--overlay-scrim);
   display: flex;
   inset: 0;
   justify-content: center;
