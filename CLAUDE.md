@@ -1,7 +1,13 @@
 # Personal File Manager Agent Instructions
 
 Claude Code가 이 저장소에서 작업할 때 매 턴 지켜야 하는 규칙이다.
-배경 설명과 근거는 `docs/releases/v0.1/`의 문서에 있다. 이 파일에는 규칙만 둔다.
+배경 설명과 근거는 `docs/releases/v{version}/`의 문서에 있다. 이 파일에는 규칙만 둔다.
+
+## Release Version Status
+
+- v0.1은 완료되어 Git 태그 `v0.1`로 고정되었다. `docs/releases/v0.1/` 아래 문서와 `backlog.json`은 이후 수정하지 않고 참조만 한다.
+- 현재 작업 버전은 v0.2다. 새 기능·문서 작업은 `docs/releases/v0.2/`에 둔다. 아직 v0.2 문서가 없다면 작업을 시작하기 전에 `BRIEF.md → PRD.md → SPEC.md → PLAN.md → backlog.json` 순서로 새로 만든다.
+- v0.1 문서의 내용을 바꿔야 할 필요가 생기면, v0.1 파일을 고치는 대신 v0.2 문서에 변경 사항을 기록한다. v0.1 문서의 오탈자 수정 등 내용 변경이 아닌 경우가 아니면 v0.1 디렉터리에 커밋하지 않는다.
 
 ## General Rules
 
@@ -25,7 +31,7 @@ Claude Code가 이 저장소에서 작업할 때 매 턴 지켜야 하는 규칙
 - 삭제의 기본값은 휴지통(`shell.trashItem`)이다. 영구 삭제는 `Shift+Delete`에만 배정하고 별도 확인을 거친다.
 - 새 의존성을 추가하기 전에 기본 API로 구현 가능한지 확인하고, 사용자 승인을 받는다.
 - 파괴적 작업(Copy / Move / Delete)은 테스트 없이 완료로 처리하지 않는다.
-- v0.1 범위를 넘는 기능을 임의로 구현하지 않는다. 범위는 `PRD.md` §5 Non-Goals에 있다.
+- 현재 작업 버전의 범위를 넘는 기능을 임의로 구현하지 않는다. 범위는 해당 버전 `PRD.md` §5 Non-Goals에 있다.
 - 문서에 확정된 키 매핑(`SPEC.md` §16)과 기술 선택(`TECH_GUIDE.md` §2)을 임의로 변경하지 않는다.
 - 성능 최적화는 `SPEC.md` §10에 명시된 것만 선제 적용하고, 나머지는 측정 후 수행한다.
 - 불필요한 추상화 계층을 추가하지 않는다.
@@ -34,12 +40,13 @@ Claude Code가 이 저장소에서 작업할 때 매 턴 지켜야 하는 규칙
 
 - 문서 역할: `BRIEF.md`(무엇을·왜) → `TECH_GUIDE.md`(어떤 기술로) → `PRD.md`(요구사항 표) → `SPEC.md`(상세 기술) → `PLAN.md`(Phase) → `backlog.json`(작업 단위).
 - 릴리스 문서는 `docs/releases/v{major}.{minor}/`에 둔다.
-- 사용자 요청으로 구현 또는 프로젝트 내용이 변경되면 영향받는 문서를 반드시 `BRIEF.md → PRD.md → SPEC.md → PLAN.md → backlog.json` 순서로 갱신한다.
+- 사용자 요청으로 구현 또는 프로젝트 내용이 변경되면 영향받는 문서를 반드시 `BRIEF.md → PRD.md → SPEC.md → PLAN.md → backlog.json` 순서로 갱신한다. 단, 완료되어 태그가 달린 버전(예: v0.1)의 문서는 대상에서 제외한다 — 갱신은 현재 작업 버전의 디렉터리에서 한다.
 - Phase 완료 여부는 `backlog.json`의 각 Phase `status` 필드에서만 관리한다. `README.md`, `BRIEF.md`, `PRD.md`, `SPEC.md`, `PLAN.md`에는 현재 또는 완료된 Phase 상태를 기록하지 않는다.
+- Git 태그가 달린 릴리스 버전의 문서와 `backlog.json`은 이후 수정하지 않는다. 참조만 하고, 후속 버전에서 필요한 변경은 후속 버전 문서에 새로 기록한다.
 
 ## Phase Execution Workflow
 
-`docs/releases/v0.1/backlog.json`과 `PLAN.md`의 Phase는 정의된 순서와 의존성을 지켜 진행한다.
+현재 작업 버전 디렉터리(`docs/releases/v{version}/`)의 `backlog.json`과 `PLAN.md`에 정의된 Phase는 순서와 의존성을 지켜 진행한다.
 
 각 Phase는 다음 순서로 완료한다.
 
