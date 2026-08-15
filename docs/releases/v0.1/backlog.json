@@ -444,7 +444,7 @@
       "id": "phase-08",
       "order": 8,
       "title": "마감과 패키징",
-      "status": "pending",
+      "status": "completed",
       "dependsOn": [
         "phase-07"
       ],
