@@ -2,8 +2,12 @@ import { memo } from 'react'
 import type { ReactElement } from 'react'
 
 // Primitive props only, wrapped in React.memo: focus moving between two rows
-// must re-render exactly those two rows (SPEC.md §10.2).
+// must re-render exactly those two rows (SPEC.md §10.2). `index` is a
+// primitive too -- FileList reads it back off `data-index` via event
+// delegation on the container instead of passing a new closure per row,
+// which would defeat the memoization this component exists for.
 type FileRowProps = {
+  index: number
   top: number
   name: string
   ext: string
@@ -12,9 +16,10 @@ type FileRowProps = {
   isDirectory: boolean
   isFocused: boolean
   isSelected: boolean
+  iconUrl: string | null
 }
 
-function FileRowComponent({ top, name, ext, sizeLabel, dateLabel, isDirectory, isFocused, isSelected }: FileRowProps): ReactElement {
+function FileRowComponent({ index, top, name, ext, sizeLabel, dateLabel, isDirectory, isFocused, isSelected, iconUrl }: FileRowProps): ReactElement {
   const className = [
     'file-row',
     isDirectory ? 'file-row-directory' : '',
@@ -25,7 +30,10 @@ function FileRowComponent({ top, name, ext, sizeLabel, dateLabel, isDirectory, i
     .join(' ')
 
   return (
-    <div className={className} style={{ top }}>
+    <div className={className} style={{ top }} data-index={index}>
+      <span className="file-row-cell file-row-icon">
+        {!isDirectory && iconUrl ? <img src={iconUrl} width={16} height={16} alt="" /> : null}
+      </span>
       <span className="file-row-cell file-row-name">{name}</span>
       <span className="file-row-cell file-row-ext">{ext}</span>
       <span className="file-row-cell file-row-size">{sizeLabel}</span>

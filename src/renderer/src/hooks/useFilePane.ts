@@ -51,20 +51,28 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
     navigate(parent, { mode: 'parentOf', name: lastSegment(state.currentPath) })
   }, [state.currentPath, navigate])
 
-  const activateFocused = useCallback(() => {
-    const focused = state.entries[state.focusedIndex]
-    if (!focused) return
+  // Used by both Enter (on the focused row) and a mouse double-click (on
+  // whichever row was clicked) -- see activateFocused() and selectClick()'s
+  // callers in FilePane.tsx.
+  const activateAt = useCallback(
+    (index: number) => {
+      const target = state.entries[index]
+      if (!target) return
 
-    if (focused.isParent) {
-      goToParent()
-      return
-    }
-    if (focused.isDirectory) {
-      navigate(joinPath(state.currentPath, focused.name), { mode: 'first' })
-      return
-    }
-    void window.fileManager.openPath(joinPath(state.currentPath, focused.name))
-  }, [state.entries, state.focusedIndex, state.currentPath, navigate, goToParent])
+      if (target.isParent) {
+        goToParent()
+        return
+      }
+      if (target.isDirectory) {
+        navigate(joinPath(state.currentPath, target.name), { mode: 'first' })
+        return
+      }
+      void window.fileManager.openPath(joinPath(state.currentPath, target.name))
+    },
+    [state.entries, state.currentPath, navigate, goToParent]
+  )
+
+  const activateFocused = useCallback(() => activateAt(state.focusedIndex), [activateAt, state.focusedIndex])
 
   const moveFocus = useCallback((delta: number) => dispatch({ type: 'moveFocus', delta }), [])
   const moveFocusToEdge = useCallback((edge: 'home' | 'end') => dispatch({ type: 'moveFocusToEdge', edge }), [])
@@ -82,6 +90,23 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
   const toggleSelect = useCallback(() => dispatch({ type: 'toggleSelect' }), [])
   const selectAll = useCallback(() => dispatch({ type: 'selectAll' }), [])
   const clearSelection = useCallback(() => dispatch({ type: 'clearSelection' }), [])
+
+  // Tracks the last plain/ctrl click for Shift+Click range selection.
+  // Kept in a ref (not reducer state) because it is UI interaction history,
+  // not part of the persisted/serializable pane state.
+  const rangeAnchorRef = useRef(0)
+  const selectClick = useCallback((index: number, ctrlKey: boolean, shiftKey: boolean) => {
+    if (shiftKey) {
+      dispatch({ type: 'selectRange', from: rangeAnchorRef.current, to: index })
+      return
+    }
+    if (ctrlKey) {
+      dispatch({ type: 'toggleSelectAt', index })
+    } else {
+      dispatch({ type: 'selectOnly', index })
+    }
+    rangeAnchorRef.current = index
+  }, [])
 
   const typeAhead = useCallback(
     (char: string) => {
@@ -112,6 +137,7 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
     moveFocus,
     moveFocusToEdge,
     activateFocused,
+    activateAt,
     goToParent,
     goToPath,
     setSort,
@@ -120,6 +146,7 @@ export function useFilePane(initialPath: string, initialSortKey: SortKey = 'name
     refresh,
     toggleSelect,
     selectAll,
-    clearSelection
+    clearSelection,
+    selectClick
   }
 }

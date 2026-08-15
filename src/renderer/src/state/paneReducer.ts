@@ -16,6 +16,9 @@ export type PaneAction =
   | { type: 'toggleSelect' }
   | { type: 'selectAll' }
   | { type: 'clearSelection' }
+  | { type: 'selectOnly'; index: number }
+  | { type: 'toggleSelectAt'; index: number }
+  | { type: 'selectRange'; from: number; to: number }
 
 // "[..]" is a synthetic entry, not something listDirectory returns -- see
 // SPEC.md §4.2 (always pinned first) and §7.1 (isParent flag).
@@ -133,5 +136,46 @@ export function paneReducer(state: PaneState, action: PaneAction): PaneState {
 
     case 'clearSelection':
       return { ...state, selectedNames: new Set() }
+
+    // Plain click (SPEC.md §3.4/backlog phase-08: "클릭 선택"): focuses and
+    // selects only the clicked row, replacing any prior selection. "[..]"
+    // gets focus but is never added to selectedNames (SPEC.md §5.2).
+    case 'selectOnly': {
+      if (state.entries.length === 0) return state
+      const index = clamp(action.index, 0, state.entries.length - 1)
+      const entry = state.entries[index]
+      const selectedNames = entry && !entry.isParent ? new Set([entry.name.toLowerCase()]) : new Set<string>()
+      return { ...state, focusedIndex: index, selectedNames }
+    }
+
+    // Ctrl+Click: toggles just the clicked row without touching the rest of
+    // the selection, mirroring Space's toggle semantics (SPEC.md §5.2) but
+    // without advancing focus afterward.
+    case 'toggleSelectAt': {
+      if (state.entries.length === 0) return state
+      const index = clamp(action.index, 0, state.entries.length - 1)
+      const entry = state.entries[index]
+      if (!entry || entry.isParent) return { ...state, focusedIndex: index }
+      const key = entry.name.toLowerCase()
+      const selectedNames = new Set(state.selectedNames)
+      if (selectedNames.has(key)) selectedNames.delete(key)
+      else selectedNames.add(key)
+      return { ...state, focusedIndex: index, selectedNames }
+    }
+
+    // Shift+Click: replaces the selection with the contiguous range between
+    // the last click anchor and the clicked row (inclusive), "[..]" excluded.
+    case 'selectRange': {
+      if (state.entries.length === 0) return state
+      const from = clamp(action.from, 0, state.entries.length - 1)
+      const to = clamp(action.to, 0, state.entries.length - 1)
+      const [lo, hi] = from <= to ? [from, to] : [to, from]
+      const selectedNames = new Set<string>()
+      for (let index = lo; index <= hi; index++) {
+        const entry = state.entries[index]
+        if (entry && !entry.isParent) selectedNames.add(entry.name.toLowerCase())
+      }
+      return { ...state, focusedIndex: to, selectedNames }
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getParentPath, joinPath, lastSegment } from './pathHelpers'
+import { driveLetterOf, getParentPath, joinPath, lastSegment } from './pathHelpers'
 
 describe('getParentPath', () => {
   it('returns null at a drive root', () => {
@@ -36,5 +36,19 @@ describe('lastSegment', () => {
 
   it('returns the drive letter for a root path', () => {
     expect(lastSegment('C:\\')).toBe('C:')
+  })
+})
+
+describe('driveLetterOf', () => {
+  it('uppercases a lowercase drive letter', () => {
+    expect(driveLetterOf('d:\\projects\\tools')).toBe('D')
+  })
+
+  it('reads the letter from a root path', () => {
+    expect(driveLetterOf('C:\\')).toBe('C')
+  })
+
+  it('returns an empty string for a path with no drive letter', () => {
+    expect(driveLetterOf('\\\\server\\share')).toBe('')
   })
 })

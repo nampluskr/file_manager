@@ -16,6 +16,13 @@ export function joinPath(basePath: string, name: string): string {
   return `${basePath.replace(/[\\/]+$/, '')}\\${name}`
 }
 
+// Uppercased drive letter for a Windows path, e.g. "d:\projects" -> "D"
+// (SPEC.md §3.2 DriveBar). Returns "" for a path with no drive letter (a UNC
+// path such as "\\server\share" -- out of scope for v0.1's DriveBar).
+export function driveLetterOf(path: string): string {
+  return /^[a-zA-Z]:/.test(path) ? path[0].toUpperCase() : ''
+}
+
 export function lastSegment(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '')
   const separatorIndex = trimmed.lastIndexOf('\\')

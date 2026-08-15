@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import type { KeyboardEvent, ReactElement } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import type { PaneState, SortKey } from '../../../../shared/types'
 import type { DialogState } from '../../../../shared/types'
-import type { ConflictAction, OpResult, TransferRequest } from '../../../../shared/ipc'
+import type { ConflictAction, DriveInfo, OpResult, TransferRequest } from '../../../../shared/ipc'
 import { useFilePane } from '../../hooks/useFilePane'
 import { FileList } from '../FileList/FileList'
 import { PathBar } from '../PathBar/PathBar'
+import { DriveBar } from '../DriveBar/DriveBar'
 import { StatusBar } from '../StatusBar/StatusBar'
 import { CommandLauncher } from '../CommandLauncher/CommandLauncher'
-import { joinPath } from '../../state/pathHelpers'
+import { driveLetterOf, joinPath } from '../../state/pathHelpers'
+import { formatCapacity } from '../../state/format'
 
 const PRINTABLE_KEY_PATTERN = /^[\p{L}\p{N}]$/u
 
@@ -43,6 +45,7 @@ function summarizeResult(result: OpResult): string {
 }
 
 type FilePaneProps = {
+  side: 'left' | 'right'
   initialPath: string
   initialSortKey: SortKey
   initialSortAsc: boolean
@@ -51,6 +54,7 @@ type FilePaneProps = {
   overlayOpen: boolean
   otherPanePath: string
   refreshToken: number
+  drives: DriveInfo[] | null
   onView: (path: string) => void
   onEdit: (path: string) => void
   onStateChange: (state: PaneState) => void
@@ -61,7 +65,10 @@ type FilePaneProps = {
   favorites: { key: number; label: string; path: string }[]
 }
 
+const DRIVE_MENU_KEY: Record<'left' | 'right', string> = { left: 'F1', right: 'F2' }
+
 export function FilePane({
+  side,
   initialPath,
   initialSortKey,
   initialSortAsc,
@@ -70,6 +77,7 @@ export function FilePane({
   overlayOpen,
   otherPanePath,
   refreshToken,
+  drives,
   onView,
   onEdit,
   onStateChange,
@@ -79,12 +87,30 @@ export function FilePane({
   onOperationComplete,
   favorites
 }: FilePaneProps): ReactElement {
-  const { state, moveFocus, moveFocusToEdge, activateFocused, goToParent, goToPath, setSort, setScrollTop, typeAhead, refresh, toggleSelect, selectAll, clearSelection } =
-    useFilePane(initialPath, initialSortKey, initialSortAsc, initialState)
+  const {
+    state,
+    moveFocus,
+    moveFocusToEdge,
+    activateFocused,
+    activateAt,
+    goToParent,
+    goToPath,
+    setSort,
+    setScrollTop,
+    typeAhead,
+    refresh,
+    toggleSelect,
+    selectAll,
+    clearSelection,
+    selectClick
+  } = useFilePane(initialPath, initialSortKey, initialSortAsc, initialState)
   const [pageSize, setPageSize] = useState(10)
   const [launcherFocused, setLauncherFocused] = useState(false)
   const [favoritesOpen, setFavoritesOpen] = useState(false)
   const [favoriteIndex, setFavoriteIndex] = useState(0)
+  const [driveMenuOpen, setDriveMenuOpen] = useState(false)
+  const [driveMenuIndex, setDriveMenuIndex] = useState(0)
+  const [driveUsage, setDriveUsage] = useState<{ free: number; total: number } | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [dialogError, setDialogError] = useState<string | null>(null)
@@ -92,6 +118,7 @@ export function FilePane({
   const dialogInputRef = useRef<HTMLInputElement>(null)
   const opIdRef = useRef<string | null>(null)
   const isFirstRefreshToken = useRef(true)
+  const driveLetter = driveLetterOf(state.currentPath)
 
   // Without this, Arrow/Enter/Backspace do nothing until the user clicks
   // the pane or tabs into it (SPEC.md §4.3 expects them to work immediately).
@@ -101,22 +128,85 @@ export function FilePane({
 
   useEffect(() => onStateChange(state), [onStateChange, state])
 
+  // Fetches this pane's drive capacity without disturbing whatever value is
+  // already shown -- SPEC.md §10.3: "값이 도착하기 전에는 이전 값 또는
+  // 빈칸을 유지한다".
+  function refreshDriveUsage(letter: string): void {
+    if (!letter) return
+    window.fileManager
+      .driveUsage(letter)
+      .then(setDriveUsage)
+      .catch(() => setDriveUsage(null))
+  }
+
   useEffect(() => {
-    const refreshOnFocus = (): void => refresh()
+    const refreshOnFocus = (): void => {
+      refresh()
+      refreshDriveUsage(driveLetter)
+    }
     window.addEventListener('focus', refreshOnFocus)
     return () => window.removeEventListener('focus', refreshOnFocus)
-  }, [refresh])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh, driveLetter])
 
   // A completed operation on either pane invalidates both panes' listings
-  // (SPEC.md §6.1 step 7); refreshToken is bumped by the parent for that.
+  // (SPEC.md §6.1 step 7) and this pane's own drive's capacity;
+  // refreshToken is bumped by the parent for that.
   useEffect(() => {
     if (isFirstRefreshToken.current) {
       isFirstRefreshToken.current = false
       return
     }
     refresh()
+    refreshDriveUsage(driveLetter)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken])
+
+  // The pane switched to a different drive: blank the stale reading until
+  // the new drive's capacity arrives (SPEC.md §3.2).
+  useEffect(() => {
+    setDriveUsage(null)
+    refreshDriveUsage(driveLetter)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driveLetter])
+
+  // Alt+F1 (left) / Alt+F2 (right) opens this pane's drive list regardless
+  // of which pane currently has keyboard focus (SPEC.md §4.7), and the menu
+  // itself must keep responding to Arrow/Enter/Escape the same way even if
+  // focus is still sitting in the other pane -- so both the trigger and the
+  // menu's own navigation are handled on a window-level listener instead of
+  // paneRef's onKeyDown, which only fires while this pane is focused.
+  useEffect(() => {
+    const handleDriveMenuKey = (event: KeyboardEvent): void => {
+      if (driveMenuOpen) {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setDriveMenuOpen(false)
+        } else if (event.key === 'ArrowDown' && drives && drives.length > 0) {
+          event.preventDefault()
+          setDriveMenuIndex((index) => Math.min(index + 1, drives.length - 1))
+        } else if (event.key === 'ArrowUp' && drives && drives.length > 0) {
+          event.preventDefault()
+          setDriveMenuIndex((index) => Math.max(index - 1, 0))
+        } else if (event.key === 'Enter') {
+          const drive = drives?.[driveMenuIndex]
+          if (drive) {
+            event.preventDefault()
+            goToPath(`${drive.letter}:\\`)
+            setDriveMenuOpen(false)
+          }
+        }
+        return
+      }
+      if (!event.altKey || event.key !== DRIVE_MENU_KEY[side]) return
+      if (overlayOpen || dialog || favoritesOpen) return
+      event.preventDefault()
+      setDriveMenuIndex(0)
+      setDriveMenuOpen(true)
+    }
+    window.addEventListener('keydown', handleDriveMenuKey)
+    return () => window.removeEventListener('keydown', handleDriveMenuKey)
+  }, [side, overlayOpen, dialog, favoritesOpen, driveMenuOpen, driveMenuIndex, drives, goToPath])
 
   useEffect(() => {
     const offProgress = window.fileManager.onProgress((payload) => {
@@ -239,8 +329,15 @@ export function FilePane({
     refresh()
   }
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (overlayOpen) return
+
+    // The drive menu's own navigation is handled by the window-level
+    // listener above (it must work even when the *other* pane is focused);
+    // returning early here just stops this pane's own Arrow/Enter handling
+    // from double-firing on the same keypress when this pane happens to be
+    // the focused one.
+    if (driveMenuOpen) return
 
     if (dialog) {
       if (dialog.kind === 'progress') {
@@ -320,7 +417,10 @@ export function FilePane({
         selectAll()
         return
       }
-      if (event.key.toLowerCase() === 'd') {
+      // Excludes Shift: Ctrl+Shift+D is the global theme toggle (SPEC.md
+      // §16.6), handled by a separate window-level listener in App.tsx --
+      // without this check, that shortcut also opened Favorites here.
+      if (event.key.toLowerCase() === 'd' && !event.shiftKey) {
         event.preventDefault()
         setFavoriteIndex(0)
         setFavoritesOpen(true)
@@ -458,8 +558,10 @@ export function FilePane({
         }
       }}
     >
+      <DriveBar letter={driveLetter} usage={driveUsage} />
       <PathBar path={state.currentPath} />
       <div className="file-list-header">
+        <span className="file-row-cell file-row-icon" />
         <span className="file-row-cell file-row-name">이름</span>
         <span className="file-row-cell file-row-ext">확장자</span>
         <span className="file-row-cell file-row-size">크기</span>
@@ -473,9 +575,41 @@ export function FilePane({
         scrollTop={state.scrollTop}
         onScrollTopChange={setScrollTop}
         onVisibleRowCountChange={setPageSize}
+        onRowClick={(index, ctrlKey, shiftKey) => {
+          paneRef.current?.focus()
+          selectClick(index, ctrlKey, shiftKey)
+        }}
+        onRowDoubleClick={(index) => activateAt(index)}
       />
       <StatusBar entries={state.entries} selectedNames={state.selectedNames} />
       <CommandLauncher cwd={state.currentPath} focused={launcherFocused} onBlur={() => setLauncherFocused(false)} />
+      {driveMenuOpen ? (
+        <div className="favorites-overlay">
+          <div className="favorites-dialog" role="dialog" aria-modal="true" aria-label="Drives">
+            <div className="favorites-title">Drives</div>
+            {drives === null ? (
+              <div className="favorites-empty">조회 중...</div>
+            ) : drives.length === 0 ? (
+              <div className="favorites-empty">사용 가능한 드라이브가 없습니다.</div>
+            ) : (
+              drives.map((drive, index) => (
+                <button
+                  className={index === driveMenuIndex ? 'favorites-focused' : ''}
+                  key={drive.letter}
+                  type="button"
+                  onClick={() => {
+                    goToPath(`${drive.letter}:\\`)
+                    setDriveMenuOpen(false)
+                  }}
+                >
+                  {drive.letter}: {drive.free !== null && drive.total !== null ? `[${formatCapacity(drive.free)} / ${formatCapacity(drive.total)}]` : ''}
+                </button>
+              ))
+            )}
+            <button type="button" onClick={() => setDriveMenuOpen(false)}>Close</button>
+          </div>
+        </div>
+      ) : null}
       {favoritesOpen ? (
         <div className="favorites-overlay">
           <div className="favorites-dialog" role="dialog" aria-modal="true" aria-label="Favorites">

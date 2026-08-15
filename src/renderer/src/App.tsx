@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { PaneState, Settings } from '../../shared/types'
+import type { DriveInfo } from '../../shared/ipc'
 import { FilePane } from './components/FilePane/FilePane'
 import { Viewer } from './components/Viewer/Viewer'
 import { Editor } from './components/Editor/Editor'
+import { FunctionKeyBar } from './components/FunctionKeyBar/FunctionKeyBar'
 
 export function App(): ReactElement {
   const [viewerPath, setViewerPath] = useState<string | null>(null)
@@ -12,10 +14,32 @@ export function App(): ReactElement {
   const [paneSnapshots, setPaneSnapshots] = useState<Partial<Record<'left' | 'right', PaneState>>>({})
   const [paneInstance, setPaneInstance] = useState({ left: 0, right: 0 })
   const [refreshToken, setRefreshToken] = useState(0)
+  const [drives, setDrives] = useState<DriveInfo[] | null>(null)
   const saveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     void window.fileManager.loadSettings().then(setSettings)
+  }, [])
+
+  // Fetched once and cached for the app's lifetime (SPEC.md §10.4/§4.7):
+  // both panes' Alt+F1/F2 drive menus share this single list.
+  useEffect(() => {
+    void window.fileManager.listDrives().then(setDrives)
+  }, [])
+
+  // Ctrl+Shift+D theme toggle is a "전역" shortcut (SPEC.md §16.6/§16.7): it
+  // must fire even while an overlay or dialog has focus, including a dialog
+  // input that stops propagation on its own keydown to keep the pane's
+  // Escape/Enter handling from double-firing. A capture-phase listener runs
+  // before any of that, so it is unaffected by a later stopPropagation call.
+  useEffect(() => {
+    const handleThemeToggle = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== 'd') return
+      event.preventDefault()
+      setSettings((current) => (current ? { ...current, theme: current.theme === 'dark' ? 'light' : 'dark' } : current))
+    }
+    window.addEventListener('keydown', handleThemeToggle, true)
+    return () => window.removeEventListener('keydown', handleThemeToggle, true)
   }, [])
 
   useEffect(() => {
@@ -70,13 +94,14 @@ export function App(): ReactElement {
   if (!settings) return <div className="app-loading">Loading settings...</div>
 
   return (
-    <>
+    <div className="app-shell">
       <div className="file-pane-layout">
         {(['left', 'right'] as const).map((side) => {
           const pane = settings.panes[side]
           const otherSide = side === 'left' ? 'right' : 'left'
           return <FilePane
             key={`${side}-${paneInstance[side]}`}
+            side={side}
             initialPath={pane.path}
             initialSortKey={pane.sortKey}
             initialSortAsc={pane.sortAsc}
@@ -85,6 +110,7 @@ export function App(): ReactElement {
             overlayOpen={viewerPath !== null || editorPath !== null}
             otherPanePath={paneSnapshots[otherSide]?.currentPath ?? settings.panes[otherSide].path}
             refreshToken={refreshToken}
+            drives={drives}
             onView={setViewerPath}
             onEdit={setEditorPath}
             onStateChange={side === 'left' ? handleLeftPaneStateChange : handleRightPaneStateChange}
@@ -96,8 +122,9 @@ export function App(): ReactElement {
           />
         })}
       </div>
+      <FunctionKeyBar />
       {viewerPath ? <Viewer path={viewerPath} onClose={() => setViewerPath(null)} /> : null}
       {editorPath ? <Editor path={editorPath} onClose={() => setEditorPath(null)} /> : null}
-    </>
+    </div>
   )
 }

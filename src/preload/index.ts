@@ -3,6 +3,7 @@ import type { FileEntry, Settings } from '../shared/types'
 import type {
   ConflictResponse,
   DeleteRequest,
+  DriveInfo,
   IpcEvents,
   OpResult,
   PresetId,
@@ -28,6 +29,10 @@ contextBridge.exposeInMainWorld('fileManager', {
   writeText: (request: WriteTextRequest): Promise<WriteTextResult> => ipcRenderer.invoke('file:writeText', request),
   loadSettings: (): Promise<Settings> => ipcRenderer.invoke('config:load'),
   saveSettings: (settings: Settings): Promise<void> => ipcRenderer.invoke('config:save', settings),
+
+  listDrives: (): Promise<DriveInfo[]> => ipcRenderer.invoke('sys:listDrives'),
+  driveUsage: (letter: string): Promise<{ free: number; total: number }> => ipcRenderer.invoke('sys:driveUsage', letter),
+  fileIcon: (ext: string): Promise<string> => ipcRenderer.invoke('sys:fileIcon', ext),
 
   createDirectory: (path: string, name: string): Promise<OpResult> => ipcRenderer.invoke('fs:createDirectory', path, name),
   rename: (path: string, from: string, to: string): Promise<OpResult> => ipcRenderer.invoke('fs:rename', path, from, to),

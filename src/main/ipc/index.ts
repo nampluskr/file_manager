@@ -19,7 +19,9 @@ import { renameItem } from '../filesystem/renameItem'
 import { createDirectory } from '../filesystem/createDirectory'
 import { deletePermanently } from '../filesystem/deleteItems'
 import { trashItems } from '../system/trash'
-import type { ConflictResponse, DeleteRequest, OpResult, TransferRequest, WriteTextRequest } from '../../shared/ipc'
+import { driveUsage, listDrives } from '../system/drives'
+import { getFileIconDataUrl } from '../system/icons'
+import type { ConflictResponse, DeleteRequest, DriveInfo, OpResult, TransferRequest, WriteTextRequest } from '../../shared/ipc'
 import type { FileEntry, Settings } from '../../shared/types'
 
 // SPEC.md §12.3: Main validates every path a Renderer sends.
@@ -346,6 +348,20 @@ export function registerIpcHandlers(): void {
         cancelled: false
       }
     }
+  })
+
+  ipcMain.handle('sys:listDrives', async (): Promise<DriveInfo[]> => listDrives())
+
+  ipcMain.handle('sys:driveUsage', async (_event, requestedLetter: unknown): Promise<{ free: number; total: number }> => {
+    if (typeof requestedLetter !== 'string' || !/^[A-Za-z]$/.test(requestedLetter)) {
+      throw new Error('잘못된 드라이브 문자입니다')
+    }
+    return driveUsage(requestedLetter.toUpperCase())
+  })
+
+  ipcMain.handle('sys:fileIcon', async (_event, requestedExt: unknown): Promise<string> => {
+    if (typeof requestedExt !== 'string') throw new Error('잘못된 확장자입니다')
+    return getFileIconDataUrl(requestedExt)
   })
 
   ipcMain.handle('config:load', async (): Promise<Settings> => restoreSettings(settingsPath, defaultSettings))

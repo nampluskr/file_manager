@@ -215,4 +215,56 @@ describe('paneReducer', () => {
     const resorted = paneReducer(focusedOnB, { type: 'setSort', key: 'name' }) // now descending: c, b, a
     expect(resorted.entries[resorted.focusedIndex].name).toBe('b')
   })
+
+  describe('mouse click selection', () => {
+    function listState(): ReturnType<typeof paneReducer> {
+      let state = createInitialPaneState('C:\\Users\\nampl')
+      state = paneReducer(state, {
+        type: 'loadSuccess',
+        path: 'C:\\Users\\nampl',
+        rawEntries: [makeDir('docs'), makeFile('a.txt'), makeFile('b.txt')],
+        focus: { mode: 'first' }
+      })
+      return state // entries: [.., docs, a.txt, b.txt]
+    }
+
+    it('selectOnly replaces the selection with just the clicked row', () => {
+      let state = listState()
+      state = paneReducer(state, { type: 'selectOnly', index: 3 }) // b.txt
+      expect(state.selectedNames).toEqual(new Set(['b.txt']))
+      expect(state.focusedIndex).toBe(3)
+
+      const next = paneReducer(state, { type: 'selectOnly', index: 2 }) // a.txt
+      expect(next.selectedNames).toEqual(new Set(['a.txt']))
+    })
+
+    it('selectOnly on "[..]" focuses it but selects nothing', () => {
+      const state = paneReducer(listState(), { type: 'selectOnly', index: 0 })
+      expect(state.selectedNames.size).toBe(0)
+      expect(state.focusedIndex).toBe(0)
+    })
+
+    it('toggleSelectAt adds or removes just the clicked row, leaving the rest alone', () => {
+      let state = listState()
+      state = paneReducer(state, { type: 'selectOnly', index: 2 }) // a.txt selected
+      state = paneReducer(state, { type: 'toggleSelectAt', index: 3 }) // + b.txt
+      expect(state.selectedNames).toEqual(new Set(['a.txt', 'b.txt']))
+
+      state = paneReducer(state, { type: 'toggleSelectAt', index: 2 }) // - a.txt
+      expect(state.selectedNames).toEqual(new Set(['b.txt']))
+    })
+
+    it('selectRange selects the inclusive span regardless of direction, excluding "[..]"', () => {
+      const state = listState()
+      const forward = paneReducer(state, { type: 'selectRange', from: 1, to: 3 })
+      expect(forward.selectedNames).toEqual(new Set(['docs', 'a.txt', 'b.txt']))
+      expect(forward.focusedIndex).toBe(3)
+
+      const backward = paneReducer(state, { type: 'selectRange', from: 3, to: 1 })
+      expect(backward.selectedNames).toEqual(new Set(['docs', 'a.txt', 'b.txt']))
+
+      const acrossParent = paneReducer(state, { type: 'selectRange', from: 0, to: 2 })
+      expect(acrossParent.selectedNames).toEqual(new Set(['docs', 'a.txt']))
+    })
+  })
 })

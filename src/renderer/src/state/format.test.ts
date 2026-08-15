@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDate, formatSize, truncateMiddle } from './format'
+import { formatCapacity, formatDate, formatSize, truncateMiddle } from './format'
 
 describe('formatSize', () => {
   it('shows <DIR> for directories regardless of size', () => {
@@ -18,6 +18,16 @@ describe('formatSize', () => {
 
   it('caps at gigabytes', () => {
     expect(formatSize(1024 ** 4, false)).toBe('1024.0G')
+  })
+})
+
+describe('formatCapacity', () => {
+  it('inserts a space before the unit, unlike formatSize', () => {
+    expect(formatCapacity(1024 ** 3 * 109.3)).toBe('109.3 G')
+  })
+
+  it('handles sub-kilobyte values', () => {
+    expect(formatCapacity(512)).toBe('512 B')
   })
 })
 

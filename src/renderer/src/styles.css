@@ -1,4 +1,5 @@
-/* Dark theme tokens (SPEC.md §14.3). Light theme is added in phase-08. */
+/* Theme tokens (SPEC.md §14.3): CSS Variables under :root[data-theme], no
+   color is ever hardcoded in a component. Dark is the default. */
 :root[data-theme='dark'] {
   --background: #1e1e1e;
   --panel-background: #252526;
@@ -12,6 +13,27 @@
   --status-bar: #007acc;
   --command-bar: #252526;
   --error-text: #f48771;
+}
+
+:root[data-theme='light'] {
+  --background: #ffffff;
+  --panel-background: #f3f3f3;
+  --header-background: #e8e8e8;
+  --text-primary: #1e1e1e;
+  --text-secondary: #5b5b5b;
+  --border: #cccccc;
+  --active-pane: #cce4f7;
+  --focused-item: #d6ebff;
+  --selected-item: #d9d9d9;
+  --status-bar: #0066b8;
+  --command-bar: #f3f3f3;
+  --error-text: #b02a1e;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .app-loading {
@@ -88,7 +110,32 @@ body {
 .file-pane-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+.drive-bar {
+  padding: 3px 8px;
+  background: var(--panel-background);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.function-key-bar {
+  display: flex;
+  gap: 14px;
+  padding: 3px 8px;
+  background: var(--panel-background);
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.function-key-hint kbd {
+  color: var(--text-primary);
 }
 
 .path-bar {
@@ -110,7 +157,18 @@ body {
 .file-list-header,
 .file-row {
   display: grid;
-  grid-template-columns: 1fr 70px 80px 140px;
+  grid-template-columns: 18px 1fr 70px 80px 140px;
+}
+
+.file-row-icon {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding: 0;
+}
+
+.file-row-icon img {
+  display: block;
 }
 
 .file-list-header {

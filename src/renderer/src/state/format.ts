@@ -16,6 +16,15 @@ export function formatSize(sizeBytes: number, isDirectory: boolean): string {
   return `${formatted}${SIZE_UNITS[unitIndex]}`
 }
 
+// Drive capacity display (SPEC.md §3.2): "109.3 G", with a space before the
+// unit -- unlike the FileList size column, which has none.
+export function formatCapacity(bytes: number): string {
+  const sizeLabel = formatSize(bytes, false)
+  const unit = sizeLabel.slice(-1)
+  const value = sizeLabel.slice(0, -1)
+  return `${value} ${unit}`
+}
+
 // mtime === 0 is the "unknown" sentinel used when listDirectory could not
 // stat an entry in time (SPEC.md §15, OneDrive on-demand placeholders).
 export function formatDate(epochMs: number): string {
