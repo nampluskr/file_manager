@@ -28,7 +28,12 @@ export function App(): ReactElement {
     const handleThemeToggle = (event: KeyboardEvent): void => {
       if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== 'd') return
       event.preventDefault()
-      setSettings((current) => (current ? { ...current, theme: current.theme === 'dark' ? 'light' : 'dark' } : current))
+      const nextTheme = (theme: Settings['theme']): Settings['theme'] => {
+        if (theme === 'dark') return 'light'
+        if (theme === 'light') return 'dim'
+        return 'dark'
+      }
+      setSettings((current) => (current ? { ...current, theme: nextTheme(current.theme) } : current))
     }
     window.addEventListener('keydown', handleThemeToggle, true)
     return () => window.removeEventListener('keydown', handleThemeToggle, true)

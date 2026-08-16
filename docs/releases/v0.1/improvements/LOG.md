@@ -127,3 +127,33 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
   - 대응: 패키징 전에 트레이 아이콘의 Quit으로 앱을 완전히 종료한다. 확인용 명령은 `Get-Process "Personal File Manager" -ErrorAction SilentlyContinue | Stop-Process -Force`. 빌드 후 exe 타임스탬프가 갱신됐는지 확인하면 이 실패 모드를 조기에 잡을 수 있다.
 - 사용자 확인/피드백: 프로세스 종료 후 재패키징한 빌드에서 Ctrl+O 폴더 선택이 제대로 작동함을 사용자가 확인함 (2026-08-16).
 - 상태: 확정
+
+## I003. mdviewer 탐색기 스타일 적용
+
+- 요청 일시 / 요청자: 2026-08-17 / 사용자
+- 요청 내용: mdviewer의 UI 탐색기 스타일을 file_manager에 적용해 달라는 요청. `CONTEXT.md` §4는 "색 토큰까지 전면 통일한다"는 방향을 이미 확정해 두었으나, §4.3은 mdviewer에 없는 두 개념(Active Pane 구분, 포커스/Selection 3상태 분리)의 파생값을 착수 시 사용자에게 확인하도록 명시. 착수 전 AskUserQuestion으로 4개 판단 지점을 확인함:
+  1. 포커스 없이 선택만 된 행의 배경 → `surface-hover` 계열로 표시
+  2. Active Pane 강조색 → mdviewer의 `link`/`focus` 토큰 값 재사용 (두 토큰이 mdviewer에서 항상 동일 값)
+  3. 테마 단계 → 2단계(dark/light)에서 mdviewer와 동일한 3단계(light/dark/dim)로 확장
+  4. 모서리 → mdviewer와 동일하게 `border-radius: 4px` 도입 (버튼·스크롤바 한정)
+- 변경 내용 (구현자):
+  - `src/renderer/src/styles.css`: `:root[data-theme='dark'|'light']` 토큰 값을 mdviewer(`d:\projects\tools\mdviewer\src\renderer\src\styles.css`)의 GitHub 팔레트로 전면 교체하고 `:root[data-theme='dim']` 블록을 신설. 신규 토큰 2개 추가 — `--focused-text`(포커스 행 글자색, 강한 배경 위 대비 확보), `--scrollbar-thumb-hover`. `--scrollbar-thumb`은 새 토큰을 만들지 않고 기존 `--border`를 재사용(mdviewer도 light 테마에서 동일하게 재사용하며 dark/dim 실측값도 border와 일치).
+  - `.file-row-selected`(다중 선택, 포커스 없음)에 배경(`--selected-item`)을 추가 — 기존에는 글자색만 바뀌고 배경이 없던 결함(`CONTEXT.md` §3.2)을 함께 해소. `.file-row-focused`(커서 행)는 `--focused-item` 배경 + `--focused-text` 글자색으로 강화. 두 클래스가 동시에 적용되는 행(다중 선택 위에 커서가 있는 경우)은 `.file-row-focused.file-row-selected` 결합 셀렉터로 focused가 이기도록 명시.
+  - `.favorites-dialog button.favorites-focused`에도 동일하게 `color: var(--focused-text)` 추가.
+  - `.file-list`에 mdviewer 방식의 얇은 스크롤바(`scrollbar-width: thin`, 8px webkit thumb, `border-radius: 4px`, hover 시 `--scrollbar-thumb-hover`) 추가. 다른 스크롤 영역(다이얼로그, 뷰어)은 범위 밖으로 제외.
+  - 버튼류(`.favorites-dialog button`, `.op-dialog-buttons button`/`.op-dialog input`, `.command-launcher button`, `.viewer-header button`, `.editor-header button`)에 `border-radius: 4px` 추가. 목록 행·다이얼로그 박스·패널 경계는 각진 형태 유지(mdviewer 자신도 이 요소들에는 radius를 쓰지 않음).
+  - `body`의 UI 폰트 스택에 한글 폴백 추가: `'Segoe UI', 'Malgun Gothic', sans-serif` (`CONTEXT.md` §5.2 후보, 이번에 함께 처리).
+  - `src/shared/types.ts`(`AppState.theme`, `Settings.theme`), `src/main/config/settings.ts`(검증 조건)에 `'dim'` 값 추가. `src/renderer/src/App.tsx`의 `Ctrl+Shift+D` 토글을 dark → light → dim → dark 순환으로 변경.
+  - 구조는 바꾸지 않음: grid 컬럼형 목록, 가상 스크롤, `px` 단위, `Cascadia Code` 모노스페이스 스택 유지. `rem` 전환·monospace 스택 통일은 범위 밖(별도 후보로 남김).
+- SPEC.md 대비 편차 (문서는 수정하지 않고 이 항목에만 기록, I002와 동일한 처리 방식):
+  - §14.3 토큰 목록에 없는 `--focused-text`, `--scrollbar-thumb-hover` 신규 추가
+  - §14.3 "Dark가 기본이며 Light를 제공" → 3단계(dim 추가)로 확장, 기본값은 dark 유지
+  - §14.1 "장식을 최소화" 원칙과 절충해 버튼·스크롤바에 한해 `border-radius: 4px` 도입
+- 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests, 21 test files).
+- 화면 확인: 이 세션의 Bash 도구 환경에서 `npm run dev`(및 `electron .` 직접 실행)로 Electron 창을 띄우려 했으나 I001과 동일한 사유(인터랙티브 데스크톱 세션 없음)로 GUI 창이 뜨지 않고 프로세스가 조용히 종료됨 (`electron.exe` 프로세스 자체가 생성되지 않음, `tasklist` 확인). Dark/Light/Dim 3개 테마의 실제 화면 확인을 에이전트가 완료하지 못함. 사용자가 `npm run dev` 또는 `npm run package:win`으로 직접 확인 필요. (재패키징 시 I002 기록의 트레이 EBUSY/구버전 바이너리 함정 주의 — 패키징 전 트레이에서 Quit으로 완전 종료할 것.)
+- 적대적 검증: `src/main/filesystem/*`, `src/main/ipc/*`, `src/preload/*`, 파괴적 작업 경로, 외부 프로세스 실행 인자, `src/shared/ipc.ts`를 건드리지 않음 (순수 스타일 변경 + `src/shared/types.ts`의 테마 enum 확장 + 설정 검증 로직 1줄). 검증 면제 불가 조건에 해당하지 않아 생략을 제안했고, 사용자가 생략을 확정함 (2026-08-17).
+- 빌드: 패키징 전 `release\win-unpacked`에 남아 있던 이전 빌드의 트레이 프로세스 4개(`Personal File Manager.exe`)를 `Stop-Process`로 완전 종료한 뒤 `npm run package:win` 실행 — I002 기록의 EBUSY/구버전 바이너리 함정을 피하기 위함. `release\Personal File Manager-0.1.0-Portable.exe` 생성 확인 (수정 시각 2026-08-17 01:22, 빌드 로그에 EBUSY 없이 정상 완료).
+- 남은 위험: 시각적 검증이 아직 사용자 확인을 거치지 않음. 코드 검토상 대비(contrast) 계산은 mdviewer 원본 값을 그대로 재사용했으므로 가독성 문제 가능성은 낮으나 실측 확인 전까지 단정할 수 없음.
+- 커밋: (진행 중)
+- 사용자 확인/피드백: (대기 — 사용자가 포터블 빌드로 확인 예정)
+- 상태: 재작업 필요 (사용자 화면 확인 대기)

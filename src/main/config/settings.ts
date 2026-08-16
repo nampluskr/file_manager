@@ -56,7 +56,7 @@ function isSettings(value: unknown): value is Settings {
     isSortKey(panes.right.sortKey) &&
     typeof panes.right.sortAsc === 'boolean' &&
     (settings.activePane === 'left' || settings.activePane === 'right') &&
-    (settings.theme === 'dark' || settings.theme === 'light') &&
+    (settings.theme === 'dark' || settings.theme === 'light' || settings.theme === 'dim') &&
     typeof window === 'object' &&
     window !== null &&
     typeof window.width === 'number' && Number.isFinite(window.width) && window.width > 0 &&

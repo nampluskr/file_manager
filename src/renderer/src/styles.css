@@ -1,37 +1,60 @@
-/* Theme tokens (SPEC.md §14.3): CSS Variables under :root[data-theme], no
-   color is ever hardcoded in a component. Dark is the default. */
+/* Theme tokens (SPEC.md §14.3, extended by I003 for the GitHub palette
+   ported from mdviewer): CSS Variables under :root[data-theme], no color is
+   ever hardcoded in a component. Dark is the default. */
 :root[data-theme='dark'] {
-  --background: #1e1e1e;
-  --panel-background: #252526;
-  --header-background: #2d2d2d;
-  --text-primary: #d4d4d4;
-  --text-secondary: #9d9d9d;
-  --border: #3c3c3c;
-  --active-pane: #094771;
-  --focused-item: #062f4a;
-  --selected-item: #37373d;
-  --status-bar: #007acc;
-  --command-bar: #252526;
-  --error-text: #f48771;
+  --background: #0d1117;
+  --panel-background: #161b22;
+  --header-background: #21262d;
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --border: #30363d;
+  --active-pane: #58a6ff;
+  --focused-item: #1f6feb;
+  --focused-text: #ffffff;
+  --selected-item: #21262d;
+  --status-bar: #58a6ff;
+  --command-bar: #161b22;
+  --error-text: #ff7b72;
+  --scrollbar-thumb-hover: #484f58;
   --overlay-scrim: rgb(0 0 0 / 45%);
 }
 
 :root[data-theme='light'] {
   --background: #ffffff;
-  --panel-background: #f3f3f3;
-  --header-background: #e8e8e8;
-  --text-primary: #1e1e1e;
-  --text-secondary: #5b5b5b;
-  --border: #cccccc;
-  --active-pane: #cce4f7;
-  --focused-item: #d6ebff;
-  --selected-item: #d9d9d9;
-  --status-bar: #0066b8;
-  --command-bar: #f3f3f3;
-  --error-text: #b02a1e;
+  --panel-background: #f6f8fa;
+  --header-background: #eaeef2;
+  --text-primary: #1f2328;
+  --text-secondary: #57606a;
+  --border: #d0d7de;
+  --active-pane: #0969da;
+  --focused-item: #ddf4ff;
+  --focused-text: #0969da;
+  --selected-item: #eaeef2;
+  --status-bar: #0969da;
+  --command-bar: #f6f8fa;
+  --error-text: #cf222e;
+  --scrollbar-thumb-hover: #afb8c1;
   /* Same value in both themes on purpose: a translucent black scrim reads
      correctly as a dimmer over either palette's content (A8 #9 -- tracked
      as a token rather than left as two hardcoded literals). */
+  --overlay-scrim: rgb(0 0 0 / 45%);
+}
+
+:root[data-theme='dim'] {
+  --background: #24292e;
+  --panel-background: #2f363d;
+  --header-background: #3a4149;
+  --text-primary: #d1d5da;
+  --text-secondary: #959da5;
+  --border: #4b535c;
+  --active-pane: #79b8ff;
+  --focused-item: #1f6feb;
+  --focused-text: #ffffff;
+  --selected-item: #3a4149;
+  --status-bar: #79b8ff;
+  --command-bar: #2f363d;
+  --error-text: #f97583;
+  --scrollbar-thumb-hover: #5a6270;
   --overlay-scrim: rgb(0 0 0 / 45%);
 }
 
@@ -73,13 +96,14 @@
 .favorites-dialog button {
   background: transparent;
   border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--text-primary);
   cursor: pointer;
   padding: 5px 8px;
   text-align: left;
 }
 
-.favorites-dialog button.favorites-focused { background: var(--focused-item); }
+.favorites-dialog button.favorites-focused { background: var(--focused-item); color: var(--focused-text); }
 
 .favorites-empty { color: var(--text-secondary); }
 
@@ -97,7 +121,7 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--text-primary);
-  font-family: 'Segoe UI', sans-serif;
+  font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
   font-size: 13px;
 }
 
@@ -197,6 +221,25 @@ body {
   min-height: 0;
   overflow-y: auto;
   position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.file-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.file-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.file-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.file-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 .file-list-spacer {
@@ -217,12 +260,19 @@ body {
   font-weight: 600;
 }
 
-.file-row-focused {
-  background: var(--focused-item);
+.file-row-selected {
+  background: var(--selected-item);
+  color: var(--text-primary);
 }
 
-.file-row-selected {
-  color: var(--status-bar);
+.file-row-focused {
+  background: var(--focused-item);
+  color: var(--focused-text);
+}
+
+.file-row-focused.file-row-selected {
+  background: var(--focused-item);
+  color: var(--focused-text);
 }
 
 .status-bar {
@@ -278,6 +328,7 @@ body {
 .op-dialog input {
   background: transparent;
   border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--text-primary);
   font: inherit;
   padding: 3px 8px;
@@ -320,6 +371,7 @@ body {
 .command-launcher button {
   background: transparent;
   border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
@@ -362,6 +414,7 @@ body {
 .viewer-header button {
   background: transparent;
   border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--text-primary);
 }
 
@@ -404,6 +457,7 @@ body {
 .editor-header button {
   background: transparent;
   border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--text-primary);
   margin-left: 6px;
 }

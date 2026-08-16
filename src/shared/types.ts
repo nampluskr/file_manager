@@ -50,7 +50,7 @@ export type AppState = {
   }
   activeTabIndex: { left: number; right: number }
   activePane: 'left' | 'right'
-  theme: 'dark' | 'light'
+  theme: 'dark' | 'light' | 'dim'
   overlay: OverlayState
 }
 
@@ -61,7 +61,7 @@ export type Settings = {
     right: { path: string; sortKey: SortKey; sortAsc: boolean }
   }
   activePane: 'left' | 'right'
-  theme: 'dark' | 'light'
+  theme: 'dark' | 'light' | 'dim'
   window: { width: number; height: number; x: number | null; y: number | null }
   favorites: { key: number; label: string; path: string }[] // key: 1-9
   globalHotkey: string // e.g. 'Alt+`'
