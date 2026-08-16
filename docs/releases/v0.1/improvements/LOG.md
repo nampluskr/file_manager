@@ -168,7 +168,18 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
   - 폰트 패밀리는 UI(`Segoe UI Variable`)와 모노스페이스(`Cascadia Code`, 직전 반영에서 유지 결정)만 다루고, mdviewer에는 있는 `document-content`용 콘텐츠 폰트 스케일(`--content-font-scale`) 같은 뷰어 전용 타이포그래피 기능은 이번 범위에 없어 이식하지 않음(뷰어는 file_manager에서 별도 후보로 남은 항목).
 - 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests, 21 test files).
 - 적대적 검증: 순수 스타일(색·타이포그래피) 변경이며 검증 면제 불가 조건(`src/main/filesystem/*`, `src/main/ipc/*`, `src/preload/*`, 파괴적 작업 경로, 외부 프로세스 실행 인자, `src/shared/ipc.ts`)에 해당하지 않음. 직전 반영과 동일하게 사용자 승인으로 생략.
-- 빌드: 트레이 프로세스 재확인 후 `npm run package:win` 재실행 예정 — 사용자가 이어서 확인.
+- 빌드: 트레이 프로세스 재확인(없음) 후 `npm run package:win` 재실행. `release\Personal File Manager-0.1.0-Portable.exe` 갱신 확인 (수정 시각 2026-08-17 01:31).
+- 커밋: 813d158
+
+### 추가 반영 2
+
+- 요청 일시 / 요청자: 2026-08-17 / 사용자
+- 요청 내용: 탐색기 패널에 폴더 아이콘이 안 보인다.
+- 원인 분석: 회귀가 아니라 v0.1 원래 설계의 공백이었음. `src/main/system/icons.ts`의 `getFileIcon`은 SPEC.md §17/§656(`sys:fileIcon(ext)`)에 따라 **확장자 단위**로만 OS 아이콘을 조회·캐싱하며, 폴더용 아이콘 조회 경로 자체가 없다. `FileRow.tsx`도 `{!isDirectory && iconUrl ? <img .../> : null}`로 디렉터리는 항상 아이콘 칸을 비워두고 굵은 글자(`font-weight: 600`)로만 구분했다 — v0.1 내내 그랬다. mdviewer의 `App.tsx` `EntryIcon`은 파일뿐 아니라 폴더도 인라인 SVG 글리프(`stroke="currentColor"`)로 표시하는데, 이번 I003의 "탐색기 스타일 적용"을 사용자가 이 정도까지 포함하는 것으로 요청해 반영함.
+- 변경 내용 (구현자): `src/renderer/src/components/FileRow/FileRow.tsx`에 mdviewer의 `EntryIcon`(디렉터리 분기) 경로 데이터를 그대로 가져온 `FolderIcon` 컴포넌트를 추가하고, 아이콘 칸 렌더링을 `isDirectory ? <FolderIcon /> : iconUrl ? <img .../> : null`로 변경. `stroke="currentColor"`라 별도 색 토큰 없이 행의 현재 글자색(기본 회색 → 선택/포커스 시 강조색)을 그대로 따라간다. IPC(`sys:fileIcon`), 캐싱 로직, `FileList.tsx`의 아이콘 조회 스킵 조건(`!entry.isDirectory && !entry.isParent`)은 그대로 둠 — 폴더는 여전히 OS 아이콘을 조회하지 않고 SVG로만 표시.
+- 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests, 21 test files).
+- 적대적 검증: 렌더러 컴포넌트 내 순수 표시 로직 변경(SVG 추가)이며 검증 면제 불가 조건(`src/main/filesystem/*`, `src/main/ipc/*`, `src/preload/*`, 파괴적 작업 경로, 외부 프로세스 실행 인자, `src/shared/ipc.ts`)에 해당하지 않음. 앞선 두 반영과 동일하게 사용자 승인으로 생략.
+- 빌드: (진행 중)
 - 커밋: (진행 중)
 - 사용자 확인/피드백: (대기 — 사용자가 포터블 빌드로 확인 예정)
 - 상태: 재작업 필요 (사용자 화면 확인 대기)
