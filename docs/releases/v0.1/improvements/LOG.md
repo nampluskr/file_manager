@@ -122,5 +122,8 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
   | Minor | 1 | 수정 | Ctrl+Shift+O / Ctrl+Alt+O도 폴더 선택을 열어버림 (SPEC §16 키 매핑 원칙 위반). 조건에 `!event.shiftKey && !event.altKey` 추가 |
 - Critical 수정 및 재검증: 해당 없음 (Critical 지적 없음). Major 2건, Minor 1건은 위와 같이 모두 수정 후 2차 재검증에서 해소 확인.
 - 남은 위험: 없음. 네이티브 폴더 선택 대화상자가 반환한 경로는 이후 `goToPath()` → `fs:listDirectory`로 이어지며, 그 경로에서도 `assertAbsolutePath()`(Main)로 재검증됨.
-- 사용자 확인/피드백: (확인 대기)
-- 상태: 재작업 필요 (사용자 화면 확인 대기 중)
+- 확인 과정에서 발생한 오진 1건 (코드 결함 아님): 사용자가 "Ctrl+O가 동작하지 않는다"고 보고했으나 원인은 구버전 바이너리 실행이었다. `npm run package:win`은 `npm run build`(→ `out/` 갱신) 후 electron-builder를 실행하는데, electron-builder가 `release\win-unpacked` 삭제 단계에서 `EBUSY`로 실패해도 앞단계 빌드는 이미 성공한 뒤다. 그 결과 `out/`만 새 코드로 갱신되고 `app.asar`과 portable exe는 이전 빌드 그대로 남아, 실행 중인 앱에는 I002 코드가 들어있지 않았다. `app.asar`에 구 채널 `sys:listDrives`가 남아 있고 `sys:selectFolder`가 없는 것으로 확정.
+  - `EBUSY`의 원인은 `SPEC.md` §19.1의 의도된 동작이다. 창을 닫아도 종료되지 않고 트레이로 숨으므로, 사용자가 창을 닫은 뒤에도 `release\win-unpacked\Personal File Manager.exe` 프로세스가 살아남아 electron-builder가 지워야 할 폴더를 잠근다.
+  - 대응: 패키징 전에 트레이 아이콘의 Quit으로 앱을 완전히 종료한다. 확인용 명령은 `Get-Process "Personal File Manager" -ErrorAction SilentlyContinue | Stop-Process -Force`. 빌드 후 exe 타임스탬프가 갱신됐는지 확인하면 이 실패 모드를 조기에 잡을 수 있다.
+- 사용자 확인/피드백: 프로세스 종료 후 재패키징한 빌드에서 Ctrl+O 폴더 선택이 제대로 작동함을 사용자가 확인함 (2026-08-16).
+- 상태: 확정
