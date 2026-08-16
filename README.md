@@ -17,10 +17,12 @@
 
 ## 현재 상태
 
-요구사항과 기술 명세, Phase 계획이 확정되어 있으며 구현이 진행 중입니다. Phase별 진행 상태는
-[`docs/releases/v0.1/backlog.json`](docs/releases/v0.1/backlog.json)에서 관리합니다.
+v0.1 MVP가 완성되어 Git 태그 `v0.1`로 고정되었습니다. 현재는 디자인과 사용편이성을 한 항목씩
+개선하는 단계이며, 항목별 진행 상태는
+[`docs/releases/v0.1/improvements/LOG.md`](docs/releases/v0.1/improvements/LOG.md)에서
+관리합니다.
 
-## 계획된 주요 기능
+## 주요 기능
 
 - 좌/우 독립 경로를 가진 듀얼 패널 탐색
 - 현재 경로에서 터미널 / `claude` / `codex` / `agy` / VSCode를 여는 Command Launcher
@@ -57,7 +59,16 @@ Target OS : Windows
 | [`PLAN.md`](docs/releases/v0.1/PLAN.md) | Phase별 구현 계획과 검증 절차 |
 | [`backlog.json`](docs/releases/v0.1/backlog.json) | Phase 단위 작업 항목과 진행 상태 |
 
-이후 릴리스는 각각 `docs/releases/v{major}.{minor}/` 경로를 사용합니다.
+위 문서는 v0.1 MVP를 만들 때의 산출물이며 태그 `v0.1` 시점으로 고정되어 있습니다.
+
+v0.1 완성 이후의 개선 작업은 문서 사이클을 다시 쓰지 않고 순차 기록 방식으로 진행합니다.
+
+| 문서 | 역할 |
+|---|---|
+| [`improvements/LOG.md`](docs/releases/v0.1/improvements/LOG.md) | 개선 항목별 실행 기록과 상태 |
+| [`improvements/CONTEXT.md`](docs/releases/v0.1/improvements/CONTEXT.md) | 판단 근거, 참조 기준, 후보 항목 목록 |
+
+추가 기능을 다루는 v0.2에 착수할 때 `docs/releases/v0.2/`에 문서 사이클을 새로 작성합니다.
 
 ## v0.1 범위 밖
 
