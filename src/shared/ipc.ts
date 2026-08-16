@@ -73,6 +73,7 @@ export type IpcContract = {
   'sys:driveUsage': (letter: string) => { free: number; total: number }
   'sys:selectFolder': (defaultPath: string) => string | null // native folder picker; null if cancelled
   'sys:fileIcon': (ext: string) => string // data URL
+  'sys:folderIcon': () => string // data URL; the OS shell's generic folder icon
   'sys:openPath': (path: string) => void // default associated program
   'sys:openInCode': (path: string) => void
   'sys:launch': (preset: PresetId, cwd: string) => OpResult

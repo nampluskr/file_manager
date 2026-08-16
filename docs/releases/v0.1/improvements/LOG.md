@@ -179,7 +179,34 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
 - 변경 내용 (구현자): `src/renderer/src/components/FileRow/FileRow.tsx`에 mdviewer의 `EntryIcon`(디렉터리 분기) 경로 데이터를 그대로 가져온 `FolderIcon` 컴포넌트를 추가하고, 아이콘 칸 렌더링을 `isDirectory ? <FolderIcon /> : iconUrl ? <img .../> : null`로 변경. `stroke="currentColor"`라 별도 색 토큰 없이 행의 현재 글자색(기본 회색 → 선택/포커스 시 강조색)을 그대로 따라간다. IPC(`sys:fileIcon`), 캐싱 로직, `FileList.tsx`의 아이콘 조회 스킵 조건(`!entry.isDirectory && !entry.isParent`)은 그대로 둠 — 폴더는 여전히 OS 아이콘을 조회하지 않고 SVG로만 표시.
 - 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests, 21 test files).
 - 적대적 검증: 렌더러 컴포넌트 내 순수 표시 로직 변경(SVG 추가)이며 검증 면제 불가 조건(`src/main/filesystem/*`, `src/main/ipc/*`, `src/preload/*`, 파괴적 작업 경로, 외부 프로세스 실행 인자, `src/shared/ipc.ts`)에 해당하지 않음. 앞선 두 반영과 동일하게 사용자 승인으로 생략.
-- 빌드: (진행 중)
+- 빌드: 트레이 프로세스 재확인(없음) 후 `npm run package:win` 재실행. `release\Personal File Manager-0.1.0-Portable.exe` 갱신 확인 (수정 시각 2026-08-17 01:39).
+- 커밋: 4d2813c
+
+### 추가 반영 3
+
+- 요청 일시 / 요청자: 2026-08-17 / 사용자
+- 요청 내용: "추가 반영 2"의 SVG 폴더 아이콘 대신, 다른 파일 아이콘처럼 Windows 내장 폴더 아이콘을 쓸 수 없는지 문의 → 사용자가 진행 확정.
+- 변경 내용 (구현자): SVG 폴더 아이콘을 제거하고, 파일 아이콘과 동일한 방식(OS 셸 아이콘, `app.getFileIcon`)으로 폴더 아이콘을 조회하도록 전환.
+  - `src/shared/ipc.ts`: `'sys:folderIcon': () => string` 채널 추가 (인자 없음, 모든 폴더가 동일한 셸 아이콘 하나를 공유).
+  - `src/main/system/icons.ts`: `getFolderIconDataUrl()` 추가. 확장자별 프로브 *파일*이 아니라, 이미 만들어져 있는 프로브 *디렉터리*(`probeDir()`) 자체에 `app.getFileIcon(dir, { size: 'small' })`를 호출해 Windows 탐색기가 쓰는 폴더 아이콘을 그대로 가져온다. 확장자 캐시(Map)에 NUL 바이트로 시작하는 예약 키(`'\0folder'`)로 저장 — `getFileIconDataUrl`이 쓰는 키는 실제 파일 확장자(NUL을 포함할 수 없음)뿐이라 충돌 불가능.
+  - `src/main/ipc/index.ts`: `sys:folderIcon` 핸들러 추가 (인자 없어 별도 검증 불필요).
+  - `src/preload/index.ts`, `src/shared/preload.d.ts`: `folderIcon()` 바인딩 추가.
+  - `src/renderer/src/state/iconCache.ts`: `getCachedFolderIcon()`/`ensureFolderIconLoaded()` 추가. 렌더러 쪽도 동일하게 NUL 바이트 예약 키(`'\0dir'`)로 별도 캐시 슬롯 사용, 앱 실행 중 단 1회만 IPC 호출.
+  - `src/renderer/src/components/FileList/FileList.tsx`: 디렉터리 행은 확장자 캐시 대신 폴더 아이콘 캐시를 조회하도록 분기 (`[..]`도 `isDirectory: true`라 동일 경로를 탄다).
+  - `src/renderer/src/components/FileRow/FileRow.tsx`: "추가 반영 2"에서 추가한 `FolderIcon` SVG 컴포넌트를 제거하고, 파일과 동일하게 `iconUrl`이 있으면 `<img>`로 렌더링 (아이콘 도착 전까지는 파일과 마찬가지로 빈 칸).
+- 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests, 21 test files).
+- 적대적 검증 (필수 — `src/shared/ipc.ts` IPC 계약, `src/main/ipc/*`, `src/preload/*` 변경)
+
+  | 회차 | 검토자 | 결과 요약 |
+  |---|---|---|
+  | 1 | Codex (gpt-5.6-sol), 2026-08-17 | Critical 0건, Major 0건, Minor 0건. 5개 공격 지점(IPC 계약 일관성, 예약 키 충돌 안전성, probeDir 재사용 경합, 에러 처리, FileList/FileRow 분기) 모두 이상 없음 확인 |
+
+  | 심각도 | 건수 | 처리 상태 | 근거 |
+  |---|---|---|---|
+  | (해당 없음) | 0 | - | 지적사항 없음 |
+- Critical 수정 및 재검증: 해당 없음 (Critical 지적 없음, 재검증 불필요).
+- 남은 위험: Codex가 "위반은 아니나 참고"로 언급한 사항 — 최초 폴더 아이콘 조회가 실패하면 그 세션 동안 계속 빈 칸으로 남는다(`null`을 영구 캐시). 기존 확장자별 파일 아이콘과 동일한 정책이며 SPEC.md §10.5(확장자당 1회 조회, 재시도 없음)와 일치하므로 결함이 아님.
 - 커밋: (진행 중)
-- 사용자 확인/피드백: (대기 — 사용자가 포터블 빌드로 확인 예정)
+- 빌드: (진행 중)
+- 사용자 확인/피드백: (대기)
 - 상태: 재작업 필요 (사용자 화면 확인 대기)
