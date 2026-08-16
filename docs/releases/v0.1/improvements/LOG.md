@@ -73,3 +73,20 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
 ---
 
 <!-- 개선 항목은 여기부터 append 한다. 사용자가 I001을 지정하면 시작한다. -->
+
+## I001. 패널 내부 스크롤 분리 (통째 스크롤 버그)
+
+- 요청 일시 / 요청자: 2026-08-16 / 사용자
+- 요청 내용:
+  1. 파일 매니저 실행 후 스크롤하면 패널1/패널2가 통째로 스크롤된다. 개별 목록 영역만 스크롤되어야 한다.
+  2. 상단 드라이브바/경로/이름·확장자·크기·날짜 헤더는 고정되고, 좌/우 파일 목록 부분만 내부적으로 스크롤되어야 하는데 전체가 함께 스크롤된다.
+  3. 스크롤 시 하단 F2~F8 함수키 바가 목록과 함께 밀려 이동한다.
+- 원인 분석: `src/renderer/src/styles.css`의 `.file-pane-layout`은 CSS Grid이고 `.file-pane`이 그 grid item이다. `.file-pane`에 `min-height`를 지정하지 않아 grid item 기본값인 `min-height: auto`가 적용되었고, 내부 파일 목록 전체 높이만큼 `.file-pane`이 늘어났다. 그 결과 `.file-list`의 `overflow-y: auto`가 무력화되고 `.file-pane` → `.file-pane-layout` → `body`가 콘텐츠 높이만큼 커져 페이지 전체(헤더, F2~F8 바 포함)가 함께 스크롤되었다.
+- 변경 내용 (구현자): `.file-pane` 규칙에 `min-height: 0;` 한 줄 추가. 다른 파일은 수정하지 않음.
+- 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests).
+- 적대적 검증: 생략. 순수 스타일 변경(`src/renderer/src/styles.css` 한 줄)이며 검증 면제 불가 조건(`src/main/filesystem/*`, `src/main/ipc/*`, `src/preload/*`, 파괴적 작업 경로, 외부 프로세스 실행 인자, IPC 계약)에 해당하지 않음.
+- 화면 확인: 에이전트가 백그라운드 job 환경(인터랙티브 데스크톱 세션 없음)에서 `npm run dev`로 Electron 창을 띄우려 했으나 렌더러/프리로드 빌드까지는 성공해도 실제 GUI 창이 뜨지 않아 Dark/Light 테마 시각 확인을 완료하지 못함. 사용자가 직접 `npm run dev`로 확인하기로 함.
+- 커밋: (기록 예정)
+- 남은 위험: 없음 (스타일 변경 1줄, 로직/IPC/파일시스템 영향 없음).
+- 사용자 확인/피드백: 사용자가 직접 화면에서 확인 예정.
+- 상태: 재작업 필요 (사용자 시각 확인 대기 중)
