@@ -121,7 +121,7 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--text-primary);
-  font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+  font-family: 'Segoe UI Variable', 'Segoe UI', 'Malgun Gothic', sans-serif;
   font-size: 13px;
 }
 
@@ -172,6 +172,7 @@ body {
   padding: 4px 8px;
   background: var(--panel-background);
   border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
   font-family: 'Cascadia Code', Consolas, monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -206,6 +207,7 @@ body {
   border-bottom: 1px solid var(--border);
   padding: 2px 0;
   font-weight: 600;
+  line-height: 1.2;
   color: var(--text-secondary);
 }
 
@@ -252,11 +254,13 @@ body {
   right: 0;
   height: 22px;
   align-items: center;
+  color: var(--text-secondary);
+  line-height: 1.2;
   font-family: 'Cascadia Code', Consolas, monospace;
 }
 
 .file-row-directory {
-  color: var(--text-primary);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
@@ -310,6 +314,7 @@ body {
 
 .op-dialog-body {
   color: var(--text-secondary);
+  line-height: 1.4;
   max-height: 40vh;
   overflow-y: auto;
   white-space: pre-wrap;
@@ -427,6 +432,7 @@ body {
 
 .viewer-content pre {
   font-family: 'Cascadia Code', Consolas, monospace;
+  line-height: 1.5;
   margin: 0;
   white-space: pre-wrap;
 }
@@ -468,6 +474,7 @@ body {
   color: var(--text-primary);
   flex: 1;
   font-family: 'Cascadia Code', Consolas, monospace;
+  line-height: 1.5;
   min-height: 0;
   outline: none;
   padding: 12px;

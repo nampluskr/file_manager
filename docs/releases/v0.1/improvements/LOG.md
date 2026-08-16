@@ -154,6 +154,21 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
 - 적대적 검증: `src/main/filesystem/*`, `src/main/ipc/*`, `src/preload/*`, 파괴적 작업 경로, 외부 프로세스 실행 인자, `src/shared/ipc.ts`를 건드리지 않음 (순수 스타일 변경 + `src/shared/types.ts`의 테마 enum 확장 + 설정 검증 로직 1줄). 검증 면제 불가 조건에 해당하지 않아 생략을 제안했고, 사용자가 생략을 확정함 (2026-08-17).
 - 빌드: 패키징 전 `release\win-unpacked`에 남아 있던 이전 빌드의 트레이 프로세스 4개(`Personal File Manager.exe`)를 `Stop-Process`로 완전 종료한 뒤 `npm run package:win` 실행 — I002 기록의 EBUSY/구버전 바이너리 함정을 피하기 위함. `release\Personal File Manager-0.1.0-Portable.exe` 생성 확인 (수정 시각 2026-08-17 01:22, 빌드 로그에 EBUSY 없이 정상 완료).
 - 남은 위험: 시각적 검증이 아직 사용자 확인을 거치지 않음. 코드 검토상 대비(contrast) 계산은 mdviewer 원본 값을 그대로 재사용했으므로 가독성 문제 가능성은 낮으나 실측 확인 전까지 단정할 수 없음.
+- 커밋: 98896a0
+
+### 추가 반영
+
+- 요청 일시 / 요청자: 2026-08-17 / 사용자
+- 요청 내용: mdviewer UI의 글꼴 / 크기 / 줄간격 / 글꼴 색깔(그레이 계열) 모두 적용.
+- 변경 내용 (구현자):
+  - `body` 폰트 스택에 mdviewer의 1순위 폰트 `'Segoe UI Variable'` 추가 (`'Segoe UI Variable', 'Segoe UI', 'Malgun Gothic', sans-serif`). 폰트 크기(`13px` = mdviewer `.8125rem`)는 직전 반영에서 이미 일치해 변경 없음.
+  - **파일 목록 기본 글자색을 그레이 계열로 전환** — mdviewer의 `.explorer-file`/`.explorer-directory`가 기본 상태에서 `muted-text`(회색)이고 hover/선택 시에만 `text`(고대비)로 바뀌는 패턴을 그대로 이식. `.file-row`(파일)와 `.file-row-directory`(디렉터리, 굵게)의 기본 색을 `--text-primary`에서 `--text-secondary`로 변경. `.file-row-selected`(→ `--text-primary`)와 `.file-row-focused`(→ `--focused-text`)는 이미 강한 색으로 오버라이드하고 있어 선택/포커스 시에만 밝아지는 대비 효과가 자연스럽게 생김.
+  - `.path-bar`에 `color: var(--text-secondary)` 추가 — mdviewer의 `.current-directory`(경로 표시)가 muted-text인 것과 동일하게 맞춤. 기존에는 색 지정이 없어 `body`의 `--text-primary`를 그대로 물려받고 있었음.
+  - 줄간격(line-height) 추가: `.file-row`/`.file-list-header` `1.2`(mdviewer `.explorer-file`/`.explorer-directory`와 동일), `.op-dialog-body` `1.4`(mdviewer `.markdown-content p/li`와 동일), `.viewer-content pre`/`.editor-textarea` `1.5`(mdviewer `pre`/코드 뷰어와 동일). `.file-row`는 `height: 22px` 고정 grid 행이라 `align-items: center`로 이미 수직 정렬되므로 시각적 위치는 바뀌지 않고, 줄바꿈이 있는 텍스트 영역(다이얼로그 본문, 뷰어, 에디터)에서 가독성 차이가 생김.
+  - 폰트 패밀리는 UI(`Segoe UI Variable`)와 모노스페이스(`Cascadia Code`, 직전 반영에서 유지 결정)만 다루고, mdviewer에는 있는 `document-content`용 콘텐츠 폰트 스케일(`--content-font-scale`) 같은 뷰어 전용 타이포그래피 기능은 이번 범위에 없어 이식하지 않음(뷰어는 file_manager에서 별도 후보로 남은 항목).
+- 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests, 21 test files).
+- 적대적 검증: 순수 스타일(색·타이포그래피) 변경이며 검증 면제 불가 조건(`src/main/filesystem/*`, `src/main/ipc/*`, `src/preload/*`, 파괴적 작업 경로, 외부 프로세스 실행 인자, `src/shared/ipc.ts`)에 해당하지 않음. 직전 반영과 동일하게 사용자 승인으로 생략.
+- 빌드: 트레이 프로세스 재확인 후 `npm run package:win` 재실행 예정 — 사용자가 이어서 확인.
 - 커밋: (진행 중)
 - 사용자 확인/피드백: (대기 — 사용자가 포터블 빌드로 확인 예정)
 - 상태: 재작업 필요 (사용자 화면 확인 대기)
