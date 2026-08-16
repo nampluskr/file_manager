@@ -39,5 +39,12 @@
 - Claude Code가 마지막 실질 구현자이면 기존 `CLAUDE.md`의 규칙에 따라 Codex CLI가 검토한다. 구현 주체는 토큰 한도에 따라 항목 중간에 바뀔 수 있으며, 검토자는 마지막 실질 구현자의 반대 벤더로 정한다.
 - 자동 감지 코드나 별도 스킬은 만들지 않는다. 현재 구현 주체와 검토자 선택은 항목 보고 및 `improvements/LOG.md`의 해당 항목에 기록한다.
 - Claude 검토는 지정한 제품 소스 파일, 해당 항목의 공격 지점, `docs/releases/v0.1/SPEC.md` 조항만 컨텍스트로 사용한다. 세션 대화, 구현 근거, Git 상태·이력, 문서(`CONTEXT.md`와 `LOG.md` 포함), 설정, 테스트 산출물, 셸 도구 사용은 허용하지 않는다.
-- Codex가 Claude 검토를 실행할 때는 `claude -p`에 `--model sonnet --safe-mode --allowedTools "Read,Glob,Grep" --disallowedTools "Edit,Write,Bash" --permission-mode dontAsk --max-turns 5 --output-format json --no-session-persistence`를 사용한다. 필요하면 `--max-budget-usd`로 호출별 비용 상한을 둔다.
+- 각 지적은 `Critical / Major / Minor` 등급, 정확한 재현 조건, 위반한 SPEC 조항 번호를 포함해 심각도순으로 반환해야 한다. Claude는 파일을 수정하지 않는다.
+- Claude Sonnet 검토를 실행하는 외부 명령의 시간 제한은 기본 10분으로 설정한다.
 - Claude 검토 결과의 Critical은 Codex가 수정하고 관련 검증을 다시 실행한다. 면제 불가 조건에 해당하는 항목에서 Claude를 사용할 수 없으면 사유와 대체 검증안을 사용자에게 제시하고 승인을 받기 전에는 검토를 생략하지 않는다.
+
+Codex가 PowerShell에서 실행할 기본 명령은 다음과 같다. `<item>`, `<changed-files>`, `<adversarial-focus>`, `<spec-refs>`는 현재 작업 내용으로 대체한다. `<item>`에는 개선 항목 번호와 제목을 넣는다(예: `I001: focus and selection color separation`). 필요하면 `--max-budget-usd`로 호출별 비용 상한을 둔다.
+
+```powershell
+claude -p "You are an adversarial reviewer for <item>. Your job is to break this code, not to confirm it works. Review only these product source-code files: <changed-files>. Attack these specific points: <adversarial-focus>. Validate against these spec clauses: <spec-refs>. Do not inspect documentation, configuration, test artifacts, Git status, branches, remotes, commit history, or use Bash, PowerShell, or any shell tool. For each finding, report severity (Critical/Major/Minor), exact reproduction conditions, and the violated spec clause. Order findings by severity. Do not modify files." --model sonnet --safe-mode --allowedTools "Read,Glob,Grep" --disallowedTools "Edit,Write,Bash" --permission-mode dontAsk --max-turns 5 --output-format json --no-session-persistence
+```
