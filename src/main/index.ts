@@ -5,16 +5,15 @@ import { is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
 import { createDefaultSettings, restoreSettings, saveSettings } from './config/settings'
 
-// SPEC.md §10.4: up to 24 drive probes (C:-Z:) run concurrently at startup,
-// and a disconnected network drive occupies a libuv threadpool slot for the
-// full probe timeout without actually cancelling -- withTimeout() in
-// drives.ts only bounds how long the *caller* waits, not the underlying
-// statfs() call itself. Sized to cover all 24 probes plus headroom for
-// concurrent listDirectory/lstat work issued around the same time (A8 #1);
-// 16 left up to 8 unrelated fs calls fully serialized behind worst-case
-// probes. This still does not make the probes cancellable -- it only keeps
-// them from exhausting the pool -- the same accepted trade-off already made
-// for listDirectory's per-entry lstat timeout (see filesystem/timeoutUtils.ts).
+// SPEC.md §10.3: a disconnected network drive's driveUsage() probe occupies
+// a libuv threadpool slot for the full probe timeout without actually
+// cancelling -- withTimeout() in drives.ts only bounds how long the *caller*
+// waits, not the underlying statfs() call itself. Raised past the default of
+// 4 so a stuck probe on one pane's drive cannot serialize behind unrelated
+// concurrent listDirectory/lstat work from the other pane (A8 #1). This
+// still does not make the probe cancellable -- it only keeps it from
+// exhausting the pool -- the same accepted trade-off already made for
+// listDirectory's per-entry lstat timeout (see filesystem/timeoutUtils.ts).
 // Must be set before any async fs call is made -- it is read lazily on the
 // first threadpool submission, not at process start, so setting it here
 // (before app.whenReady() triggers any fs work) is early enough.

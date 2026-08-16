@@ -90,3 +90,37 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
 - 남은 위험: 없음 (스타일 변경 1줄, 로직/IPC/파일시스템 영향 없음).
 - 사용자 확인/피드백: 사용자가 빌드하여 이상 없이 정상 작동함을 확인함 (2026-08-16).
 - 상태: 확정
+
+## I002. Alt+F1/Alt+F2 드라이브 선택을 Ctrl+O 네이티브 폴더 선택으로 대체
+
+- 요청 일시 / 요청자: 2026-08-16 / 사용자
+- 요청 내용: Alt+F1 / Alt+F2로 왼쪽/오른쪽 패널에서 드라이브(디렉토리) 선택이 작동하지 않는다.
+- 원인 분석: `docs/releases/v0.1/SPEC.md`(§3.2, §4.7, §16)에 확정된 드라이브 선택 단축키는 Alt+F1(좌)/Alt+F2(우)이며, Alt+1/Alt+2 매핑은 문서에 없다. 사용자 확인 결과 Alt+F1을 누르면 Windows(또는 노트북 드라이버) 스크린샷 기능이 열려, 키 입력이 앱에 도달하기 전에 OS 레벨에서 가로채이는 것으로 확인됨. 렌더러 키 처리 로직의 결함이 아니라 사용자 PC의 OS/드라이버 단축키 충돌이며, 렌더러 수정으로는 해결 불가.
+- 처리 방향: 사용자가 다른 키 조합으로 변경하기로 결정. 이후 대안으로 "패널을 선택하고 Ctrl+O로 해당 패널에서만 폴더를 지정"하는 방식을 제안, Alt+F1/F2 드라이브 목록 오버레이 기능을 완전히 대체하기로 확정.
+- 변경 내용 (구현자):
+  - Alt+F1/F2로 열리던 드라이브 목록 오버레이(드라이브 루트로만 이동 가능)를 제거하고, Ctrl+O로 네이티브 OS 폴더 선택 대화상자를 열어 임의의 폴더로 바로 이동하는 기능으로 대체. 활성 패널에만 적용되며 다른 패널에는 영향 없음.
+  - `src/shared/ipc.ts`: `sys:listDrives` 채널 제거, `sys:selectFolder` 채널 추가.
+  - `src/main/ipc/index.ts`: `sys:selectFolder` 핸들러 추가 (`dialog.showOpenDialog`, `BrowserWindow.fromWebContents`로 부모 창 지정, `openDirectory` 속성). `sys:listDrives` 핸들러 제거.
+  - `src/main/system/drives.ts`: 더 이상 쓰이지 않는 `listDrives()`/`DRIVE_LETTERS` 제거. 개별 드라이브 용량 조회용 `driveUsage()`(DriveBar 표시용)는 그대로 유지.
+  - `src/preload/index.ts`, `src/shared/preload.d.ts`: `listDrives` 바인딩 제거, `selectFolder` 바인딩 추가.
+  - `src/renderer/src/App.tsx`: 이제 쓰이지 않는 `drives` 상태·`listDrives()` 호출·`DriveInfo` import 제거.
+  - `src/renderer/src/components/FilePane/FilePane.tsx`: `DRIVE_MENU_KEY`, 드라이브 메뉴 캡처 단계 키 리스너, 드라이브 메뉴 오버레이 JSX 제거. `Ctrl+O` 핸들러 추가 — `window.fileManager.selectFolder(state.currentPath)` 호출 후 결과가 있으면 `goToPath()`로 이동.
+  - `src/main/index.ts`: `UV_THREADPOOL_SIZE` 관련 주석을 "24개 드라이브 동시 프로브" 근거에서 "driveUsage 단건 프로브" 근거로 갱신 (listDrives 제거로 주석이 실측과 어긋나게 되어 수정, 설정값 자체는 변경 없음).
+  - `docs/releases/v0.1/SPEC.md`는 v0.1 동결 문서라 수정하지 않음. §3.2/§4.7/§16의 Alt+F1/F2 매핑은 문서상 그대로 남아 있으나 현재 구현과는 다르다는 점을 이 항목에 기록해 둔다.
+- 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests) — 1차/2차 수정 후 모두 재확인.
+- 적대적 검증 (필수 — `src/main/ipc/*`, `src/preload/*`, IPC 계약 변경)
+
+  | 회차 | 검토자 | 결과 요약 |
+  |---|---|---|
+  | 1 | Codex (gpt-5.6-sol), 2026-08-16 | Critical 0건. Major 2건, Minor 1건 |
+  | 2 (재검증) | Codex (gpt-5.6-sol), 2026-08-16 | 1차 지적 3건 모두 RESOLVED 확인. 신규 지적 없음 |
+
+  | 심각도 | 건수 | 처리 상태 | 근거 |
+  |---|---|---|---|
+  | Major | 1 | 수정 | `sys:selectFolder`의 `defaultPath`가 `resolve()` 정규화 없이 전달됨 (SPEC §12.3). `safeDefaultPath()` 헬퍼 추가로 `assertAbsolutePath()`와 동일하게 `resolve()` 정규화 후 사용, 실패 시 힌트 없이 진행 |
+  | Major | 1 | 수정 | Ctrl+O 연타 시 두 개의 `dialog.showOpenDialog()` 호출이 경쟁해 나중에 resolve된 것이 먼저 선택한 결과를 덮어씀 (SPEC §16.7). `folderPickerOpenRef`로 진행 중 재요청을 무시하도록 가드 추가 |
+  | Minor | 1 | 수정 | Ctrl+Shift+O / Ctrl+Alt+O도 폴더 선택을 열어버림 (SPEC §16 키 매핑 원칙 위반). 조건에 `!event.shiftKey && !event.altKey` 추가 |
+- Critical 수정 및 재검증: 해당 없음 (Critical 지적 없음). Major 2건, Minor 1건은 위와 같이 모두 수정 후 2차 재검증에서 해소 확인.
+- 남은 위험: 없음. 네이티브 폴더 선택 대화상자가 반환한 경로는 이후 `goToPath()` → `fs:listDirectory`로 이어지며, 그 경로에서도 `assertAbsolutePath()`(Main)로 재검증됨.
+- 사용자 확인/피드백: (확인 대기)
+- 상태: 재작업 필요 (사용자 화면 확인 대기 중)

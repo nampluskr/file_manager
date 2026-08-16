@@ -70,8 +70,8 @@ export type IpcContract = {
   'file:readText': (path: string) => ReadTextResult
   'file:writeText': (req: WriteTextRequest) => WriteTextResult
 
-  'sys:listDrives': () => DriveInfo[]
   'sys:driveUsage': (letter: string) => { free: number; total: number }
+  'sys:selectFolder': (defaultPath: string) => string | null // native folder picker; null if cancelled
   'sys:fileIcon': (ext: string) => string // data URL
   'sys:openPath': (path: string) => void // default associated program
   'sys:openInCode': (path: string) => void

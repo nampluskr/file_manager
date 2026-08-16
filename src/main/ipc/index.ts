@@ -1,6 +1,6 @@
 // Electron dependencies are injected only at this layer (SPEC.md §11.4).
 
-import { app, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { isAbsolute, resolve } from 'node:path'
 import { lstat } from 'node:fs/promises'
@@ -19,9 +19,9 @@ import { renameItem } from '../filesystem/renameItem'
 import { createDirectory } from '../filesystem/createDirectory'
 import { deletePermanently } from '../filesystem/deleteItems'
 import { trashItems } from '../system/trash'
-import { driveUsage, listDrives } from '../system/drives'
+import { driveUsage } from '../system/drives'
 import { getFileIconDataUrl } from '../system/icons'
-import type { ConflictResponse, DeleteRequest, DriveInfo, OpResult, TransferRequest, WriteTextRequest } from '../../shared/ipc'
+import type { ConflictResponse, DeleteRequest, OpResult, TransferRequest, WriteTextRequest } from '../../shared/ipc'
 import type { FileEntry, Settings } from '../../shared/types'
 
 // SPEC.md §12.3: Main validates every path a Renderer sends.
@@ -350,7 +350,28 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('sys:listDrives', async (): Promise<DriveInfo[]> => listDrives())
+  // Ctrl+O (I002): a native folder picker for the active pane, opened with
+  // `defaultPath` set to that pane's current directory when it's a valid
+  // absolute path -- an invalid hint is simply dropped rather than rejected,
+  // since it only seeds where the dialog starts, not a path anything reads
+  // or writes. Normalized through resolve() the same way assertAbsolutePath()
+  // does (SPEC.md §12.3), so "..": segments can't leave a hint pointing
+  // somewhere other than what it looks like at a glance.
+  function safeDefaultPath(requestedPath: unknown): string | undefined {
+    if (typeof requestedPath !== 'string' || !isAbsolute(requestedPath)) return undefined
+    const resolved = resolve(requestedPath)
+    return isAbsolute(resolved) ? resolved : undefined
+  }
+
+  ipcMain.handle('sys:selectFolder', async (event, requestedPath: unknown): Promise<string | null> => {
+    const defaultPath = safeDefaultPath(requestedPath)
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const result = window
+      ? await dialog.showOpenDialog(window, { defaultPath, properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ defaultPath, properties: ['openDirectory'] })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
 
   ipcMain.handle('sys:driveUsage', async (_event, requestedLetter: unknown): Promise<{ free: number; total: number }> => {
     if (typeof requestedLetter !== 'string' || !/^[A-Za-z]$/.test(requestedLetter)) {

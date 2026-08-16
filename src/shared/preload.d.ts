@@ -2,7 +2,6 @@ import type { FileEntry, Settings } from './types'
 import type {
   ConflictResponse,
   DeleteRequest,
-  DriveInfo,
   IpcEvents,
   OpResult,
   PresetId,
@@ -26,8 +25,8 @@ declare global {
       writeText: (request: WriteTextRequest) => Promise<WriteTextResult>
       loadSettings: () => Promise<Settings>
       saveSettings: (settings: Settings) => Promise<void>
-      listDrives: () => Promise<DriveInfo[]>
       driveUsage: (letter: string) => Promise<{ free: number; total: number }>
+      selectFolder: (defaultPath: string) => Promise<string | null>
       fileIcon: (ext: string) => Promise<string>
       createDirectory: (path: string, name: string) => Promise<OpResult>
       rename: (path: string, from: string, to: string) => Promise<OpResult>

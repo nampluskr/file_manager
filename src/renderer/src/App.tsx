@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { PaneState, Settings } from '../../shared/types'
-import type { DriveInfo } from '../../shared/ipc'
 import { FilePane } from './components/FilePane/FilePane'
 import { Viewer } from './components/Viewer/Viewer'
 import { Editor } from './components/Editor/Editor'
@@ -14,17 +13,10 @@ export function App(): ReactElement {
   const [paneSnapshots, setPaneSnapshots] = useState<Partial<Record<'left' | 'right', PaneState>>>({})
   const [paneInstance, setPaneInstance] = useState({ left: 0, right: 0 })
   const [refreshToken, setRefreshToken] = useState(0)
-  const [drives, setDrives] = useState<DriveInfo[] | null>(null)
   const saveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     void window.fileManager.loadSettings().then(setSettings)
-  }, [])
-
-  // Fetched once and cached for the app's lifetime (SPEC.md §10.4/§4.7):
-  // both panes' Alt+F1/F2 drive menus share this single list.
-  useEffect(() => {
-    void window.fileManager.listDrives().then(setDrives)
   }, [])
 
   // Ctrl+Shift+D theme toggle is a "전역" shortcut (SPEC.md §16.6/§16.7): it
@@ -110,7 +102,6 @@ export function App(): ReactElement {
             overlayOpen={viewerPath !== null || editorPath !== null}
             otherPanePath={paneSnapshots[otherSide]?.currentPath ?? settings.panes[otherSide].path}
             refreshToken={refreshToken}
-            drives={drives}
             onView={setViewerPath}
             onEdit={setEditorPath}
             onStateChange={side === 'left' ? handleLeftPaneStateChange : handleRightPaneStateChange}
