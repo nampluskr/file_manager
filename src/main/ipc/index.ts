@@ -20,7 +20,7 @@ import { createDirectory } from '../filesystem/createDirectory'
 import { deletePermanently } from '../filesystem/deleteItems'
 import { trashItems } from '../system/trash'
 import { driveUsage } from '../system/drives'
-import { getFileIconDataUrl, getFolderIconDataUrl } from '../system/icons'
+import { getFileIconDataUrl } from '../system/icons'
 import type { ConflictResponse, DeleteRequest, OpResult, TransferRequest, WriteTextRequest } from '../../shared/ipc'
 import type { FileEntry, Settings } from '../../shared/types'
 
@@ -389,11 +389,6 @@ export function registerIpcHandlers(): void {
     }
     return getFileIconDataUrl(requestedExt)
   })
-
-  // No arguments to validate: every folder shares the single OS shell
-  // folder glyph, unlike sys:fileIcon which is keyed by an untrusted
-  // extension string.
-  ipcMain.handle('sys:folderIcon', async (): Promise<string> => getFolderIconDataUrl())
 
   ipcMain.handle('config:load', async (): Promise<Settings> => restoreSettings(settingsPath, defaultSettings))
   ipcMain.handle('config:save', async (_event, settings: Settings): Promise<void> => {

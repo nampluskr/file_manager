@@ -210,3 +210,29 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
 - 빌드: 트레이 프로세스 재확인(없음) 후 `npm run package:win` 재실행. `release\Personal File Manager-0.1.0-Portable.exe` 갱신 확인 (수정 시각 2026-08-17 01:52).
 - 사용자 확인/피드백: 포터블 빌드로 확인 후 승인함 (2026-08-17).
 - 상태: 확정
+
+### 추가 반영 4
+
+- 요청 일시 / 요청자: 2026-08-17 / 사용자
+- 요청 내용: "추가 반영 3"에서 도입한 OS 셸 폴더 아이콘이 이 환경(Windows 세션)에서는 Total Commander의 노란 3D 폴더가 아니라 파란 아웃라인 스타일로 반환됨. `size: 'small'`/`'large'` 모두 시도했으나 동일 — 이 환경의 Windows 셸 자체가 그 스타일로 응답하는 것으로 확인. Total Commander의 노란 폴더는 OS에 묻지 않는 자체 내장 아이콘이라는 점을 사용자에게 공유한 뒤, 사용자가 "앱에 노란 폴더 아이콘 내장" 방향을 확정. 이후 두 차례 후속 요청으로 아이콘 크기를 Total Commander 수준으로 키움.
+- 변경 내용 (구현자):
+  - `src/renderer/src/components/FileRow/FileRow.tsx`: OS 셸 조회 대신 고정 색상(#e8a63c/#ffcb63) 노란 폴더 SVG를 그리는 `FolderIcon` 컴포넌트를 새로 추가. `isDirectory`면 무조건 이 SVG를 렌더링하고 `iconUrl`은 참조하지 않음 — 셸/테마와 무관하게 항상 동일하게 보임. 도형은 프레임을 꽉 채우도록 `viewBox`를 도형에 맞춰 타이트하게 조정(`0 0 16 13`), 최종 렌더 크기는 20×20px.
+  - "추가 반영 3"에서 추가했던 `sys:folderIcon` IPC 채널과 그 경로를 전부 제거: `src/shared/ipc.ts`(계약 선언), `src/main/ipc/index.ts`(핸들러 및 `getFolderIconDataUrl` import), `src/preload/index.ts`/`src/shared/preload.d.ts`(바인딩), `src/main/system/icons.ts`(`getFolderIconDataUrl`/`FOLDER_CACHE_KEY` 함수 자체), `src/renderer/src/state/iconCache.ts`(`getCachedFolderIcon`/`ensureFolderIconLoaded`/`DIR_KEY`). `src/renderer/src/components/FileList/FileList.tsx`도 디렉터리 행에 대한 아이콘 IPC 조회를 스킵하고 `iconUrl={null}`을 고정 전달하도록 변경.
+  - 파일 아이콘(비-디렉터리)은 계속 OS 셸 조회를 쓰되, 소스 해상도를 `size: 'small'`(16px)에서 `size: 'normal'`(32px)로 올려 20px로 확대 표시할 때 흐려지지 않도록 함(래스터를 업스케일하지 않고 다운스케일).
+  - `src/renderer/src/styles.css`: `.file-list-header`/`.file-row`의 grid 첫 컬럼을 `18px` → `26px`로 확대해 20px 아이콘이 22px 고정 행 높이 안에서 여백 없이 꽉 차게 표시되도록 조정.
+- 검증 명령: `npm run typecheck` 통과, `npm test` 통과 (139 tests, 21 test files) — 각 단계(IPC 제거, 크기 조정 2회)마다 재확인.
+- 적대적 검증 (필수 — `src/shared/ipc.ts` IPC 계약 축소, `src/main/ipc/*`, `src/preload/*` 변경)
+
+  | 회차 | 검토자 | 결과 요약 |
+  |---|---|---|
+  | 1 | Codex (gpt-5.6-sol), 2026-08-17 | Critical 0건, Major 0건, Minor 0건. IPC 계약 일관성(양방향 제거 확인), 디렉터리 행의 아이콘 IPC 미호출, probeDir/캐시 무결성(getFileIconDataUrl 경로 영향 없음), 타입 일치 확인. 검토 대상 8개 파일 밖의 잔존 참조 여부는 지시상(대상 파일 한정) 확인 불가라고 명시 |
+
+  | 심각도 | 건수 | 처리 상태 | 근거 |
+  |---|---|---|---|
+  | (해당 없음) | 0 | - | 지적사항 없음. Codex가 범위 제약으로 다루지 못한 "8개 파일 밖 잔존 참조" 항목은 에이전트가 `src/` 전체에 `folderIcon` grep으로 직접 보완 확인 — 잔존 참조 없음(새 `FolderIcon` 컴포넌트명만 존재, 이전 IPC 필드와 무관) |
+- Critical 수정 및 재검증: 해당 없음 (Critical 지적 없음, 재검증 불필요).
+- 아이콘 크기 조정 2회(18px→20px, viewBox 타이트화)는 순수 SVG 도형/렌더러 표시·CSS 변경으로 검증 면제 불가 조건에 해당하지 않아 검증 생략.
+- 남은 위험: 없음. IPC 채널이 완전히 제거되어 이전 "추가 반영 3"에서 남았던 "폴더 아이콘 최초 조회 실패 시 세션 내내 빈 칸" 위험도 함께 해소됨(더 이상 IPC 조회 자체가 없음).
+- 빌드: 매 반영마다 트레이 프로세스 종료 확인 후 `npm run package:win` 재실행. 1차 시도에서 `EBUSY: resource busy or locked, rmdir 'release\win-unpacked'` 발생(프로세스는 이미 종료된 상태였음, `win-unpacked.tmp` 잔존 확인) — 즉시 재시도로 정상 완료. 최종 `release\Personal File Manager-0.1.0-Portable.exe` 갱신 확인.
+- 사용자 확인/피드백: 포터블 빌드로 노란 폴더 아이콘 및 크기(20px) 확인 후 "적당하다"고 승인함 (2026-08-17).
+- 상태: 확정

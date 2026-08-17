@@ -3,7 +3,7 @@ import type { MouseEvent, ReactElement } from 'react'
 import type { FileEntry } from '../../../../shared/types'
 import { formatDate, formatSize } from '../../state/format'
 import { computeVisibleRange } from '../../state/windowing'
-import { ensureFolderIconLoaded, ensureIconLoaded, getCachedFolderIcon, getCachedIcon } from '../../state/iconCache'
+import { ensureIconLoaded, getCachedIcon } from '../../state/iconCache'
 import { FileRow } from '../FileRow/FileRow'
 
 export const ROW_HEIGHT = 22
@@ -103,9 +103,7 @@ export function FileList({
       <div className="file-list-spacer" style={{ height: totalHeight }}>
         {visibleEntries.map((entry, offset) => {
           const index = startIndex + offset
-          if (entry.isDirectory) {
-            if (getCachedFolderIcon() === null) ensureFolderIconLoaded(forceIconRerender)
-          } else if (!entry.isParent && getCachedIcon(entry.ext) === null) {
+          if (!entry.isDirectory && !entry.isParent && getCachedIcon(entry.ext) === null) {
             ensureIconLoaded(entry.ext, forceIconRerender)
           }
           return (
@@ -120,7 +118,7 @@ export function FileList({
               isDirectory={entry.isDirectory}
               isFocused={index === focusedIndex}
               isSelected={!entry.isParent && selectedNames.has(entry.name.toLowerCase())}
-              iconUrl={entry.isDirectory ? getCachedFolderIcon() : getCachedIcon(entry.ext)}
+              iconUrl={entry.isDirectory ? null : getCachedIcon(entry.ext)}
             />
           )
         })}

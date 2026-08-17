@@ -28,7 +28,6 @@ declare global {
       driveUsage: (letter: string) => Promise<{ free: number; total: number }>
       selectFolder: (defaultPath: string) => Promise<string | null>
       fileIcon: (ext: string) => Promise<string>
-      folderIcon: () => Promise<string>
       createDirectory: (path: string, name: string) => Promise<OpResult>
       rename: (path: string, from: string, to: string) => Promise<OpResult>
       copy: (request: TransferRequest) => Promise<OpResult>

@@ -32,7 +32,6 @@ contextBridge.exposeInMainWorld('fileManager', {
   driveUsage: (letter: string): Promise<{ free: number; total: number }> => ipcRenderer.invoke('sys:driveUsage', letter),
   selectFolder: (defaultPath: string): Promise<string | null> => ipcRenderer.invoke('sys:selectFolder', defaultPath),
   fileIcon: (ext: string): Promise<string> => ipcRenderer.invoke('sys:fileIcon', ext),
-  folderIcon: (): Promise<string> => ipcRenderer.invoke('sys:folderIcon'),
 
   createDirectory: (path: string, name: string): Promise<OpResult> => ipcRenderer.invoke('fs:createDirectory', path, name),
   rename: (path: string, from: string, to: string): Promise<OpResult> => ipcRenderer.invoke('fs:rename', path, from, to),
