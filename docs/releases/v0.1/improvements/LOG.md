@@ -235,4 +235,5 @@ Claude Sonnet headless CLI가 검토한다. 상세는 `../../../../CLAUDE.md`와
 - 남은 위험: 없음. IPC 채널이 완전히 제거되어 이전 "추가 반영 3"에서 남았던 "폴더 아이콘 최초 조회 실패 시 세션 내내 빈 칸" 위험도 함께 해소됨(더 이상 IPC 조회 자체가 없음).
 - 빌드: 매 반영마다 트레이 프로세스 종료 확인 후 `npm run package:win` 재실행. 1차 시도에서 `EBUSY: resource busy or locked, rmdir 'release\win-unpacked'` 발생(프로세스는 이미 종료된 상태였음, `win-unpacked.tmp` 잔존 확인) — 즉시 재시도로 정상 완료. 최종 `release\Personal File Manager-0.1.0-Portable.exe` 갱신 확인.
 - 사용자 확인/피드백: 포터블 빌드로 노란 폴더 아이콘 및 크기(20px) 확인 후 "적당하다"고 승인함 (2026-08-17).
+- 커밋: efc0ba0
 - 상태: 확정
